@@ -7,7 +7,7 @@ open OpenTKPlatform
 //#load "OpenTKPlatform.fs"
 //#endif
 
-let degToRad degs = float(degs) * System.Math.PI / 180.0
+open System
 
 type Visual = {
     vertices:(float*float) list
@@ -37,21 +37,42 @@ let drawActor (canvas:Canvas) (actor:Actor) =
 
 let makeShipVisual () =
     let scale = 10.
-    let verts = [ (-1.,-1.); (0.,2.); (1.,-1.) ] |> List.map (fun (x,y) -> (x*scale, y*scale))
+    let verts = [ (-1.,-1.); (2.,0.); (-1.,1.) ] |> List.map (fun (x,y) -> (x*scale, y*scale))
     { vertices=verts }
 
 let add ((p1x,p1y):float*float) ((p2x,p2y):float*float) =
     (p1x + p2x, p1y + p2y)
 
+let addMul = function
+    | (x,y), (dx,dy), s -> (x + dx * s, y + dy * s)
+
+let angleToVector (angle:float) = (Math.Cos(angle), Math.Sin(angle))
 
 let rotateActor degs actor = {actor with angle = actor.angle + degs}
 
-let rec update (app:Application) (actors:Actor list) dt (canvas:Canvas) =
+let rec update (app:Application) (actors:Actor list) (dt:float) (canvas:Canvas) =
     // Logic update
     let player = actors.[0]
-//    let player = { player with pos = add player.pos (keyboard.arrows()) }
-    let others = List.tail actors |> List.map (rotateActor 100.)
+    
+    let angleDelta =
+        if Keyboard.IsDown Key.Left then -360. * dt
+        elif Keyboard.IsDown Key.Right then 360. * dt
+        else 0.
+    let finalAngle = player.angle + angleDelta
+
+    let moveDelta = if Keyboard.IsDown Key.Up then 500. * dt else 0.
+    let forward = angleToVector (degToRad finalAngle)
+    let finalPos = addMul (player.pos, forward, moveDelta)
+
+    let player = {
+        player with
+            angle = player.angle + angleDelta;
+            pos = finalPos
+        }
+
+    let others = List.tail actors |> List.map (rotateActor (100. * dt))
     let actors = player :: others
+
     // To keep it pure, we need to re-register a new instance of update that
     // binds the udpated actors list
     app.setOnUpdate (update app actors)
@@ -59,7 +80,7 @@ let rec update (app:Application) (actors:Actor list) dt (canvas:Canvas) =
     // Render
     canvas.resetTransform ()
     canvas.clear ()
-    actors |> List.iter (fun (actor) -> drawActor canvas actor)    
+    actors |> List.iter (fun (actor) -> drawActor canvas actor)
 
 
 let main () =

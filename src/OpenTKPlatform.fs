@@ -3,24 +3,32 @@ module OpenTKPlatform
 #endif
 
 #if INTERACTIVE
-#r "external/OpenTK/OpenTK.dll"
+#r "../external/OpenTK/OpenTK.dll"
 #endif
 
 open OpenTK
 open OpenTK.Graphics
 open OpenTK.Graphics.OpenGL
-open OpenTK.Input
+
+let degToRad (degs:float) = degs * System.Math.PI / 180.0
+let radToDeg (rads:float) = rads * 180.0 / System.Math.PI
+
+// Expose OpenTK's Key enum as our own
+type Key = OpenTK.Input.Key
+
+module Keyboard =
+    let IsDown (key:Input.Key) = Input.Keyboard.GetState().IsKeyDown(key)
 
 type Canvas() =
     member this.resetTransform () =
         GL.MatrixMode(MatrixMode.Modelview)
-        GL.LoadIdentity()        
+        GL.LoadIdentity()
     member this.clear() = 
         GL.Clear(ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit)
     member this.save () = GL.PushMatrix()
     member this.restore () = GL.PopMatrix()
     member this.translate (x:float, y:float) = GL.Translate(x,y,0.)
-    member this.rotate angle = GL.Rotate(angle, Vector3d.UnitZ)    
+    member this.rotate angle = GL.Rotate(radToDeg angle, Vector3d.UnitZ)
     member this.drawVertices (verts:(float*float) list) =
         GL.Begin(BeginMode.LineLoop)
         GL.Color3(1.f, 1.f, 1.f);
@@ -44,7 +52,7 @@ type GameWindow(title) =
 
     override this.OnUpdateFrame e =
         base.OnUpdateFrame e
-        if Keyboard.GetState().[Key.Escape] then base.Close()
+        if Input.Keyboard.GetState().[Input.Key.Escape] then base.Close()
 //        onUpdate e.Time canvas
 
     override this.OnRenderFrame e =
@@ -79,8 +87,9 @@ let centerGameWindow (gameWindow:GameWindow) =
     gameWindow
 
 type Application(title) =
-    let gameWindow = new GameWindow(title)
-                    |> setGameWindowSizeScreenRatio 0.8
-                    |> centerGameWindow
+    let gameWindow =
+        new GameWindow(title)
+            |> setGameWindowSizeScreenRatio 0.8
+            |> centerGameWindow
     member this.setOnUpdate = gameWindow.setOnUpdate
     member this.run () = gameWindow.Run(30.)
