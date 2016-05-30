@@ -55,8 +55,8 @@ let rec update (app:Application) (actors:Actor list) (dt:float) (canvas:Canvas) 
     let player = actors.[0]
     
     let angleDelta =
-        if Keyboard.IsDown Key.Left then -360. * dt
-        elif Keyboard.IsDown Key.Right then 360. * dt
+        if Keyboard.IsDown Key.Left then 360. * dt
+        elif Keyboard.IsDown Key.Right then -360. * dt
         else 0.
     let finalAngle = player.angle + angleDelta
 
@@ -97,7 +97,7 @@ let main () =
         {ship with pos=(250.,250.); angle=95.}
     ]
     
-    let app = new Application("FSharpRipOff")
+    let app = new Application("FSharpRipOff", (800, 600))
     app.setOnUpdate (update app actors)
     app.run ()
 

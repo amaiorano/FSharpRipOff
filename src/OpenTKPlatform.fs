@@ -24,6 +24,7 @@ type Canvas() =
         GL.MatrixMode(MatrixMode.Modelview)
         GL.LoadIdentity()
     member this.clear() = 
+        GL.ClearColor(0.f, 0.f, 0.2f, 1.f)
         GL.Clear(ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit)
     member this.save () = GL.PushMatrix()
     member this.restore () = GL.PopMatrix()
@@ -35,7 +36,7 @@ type Canvas() =
         verts |> Seq.iter GL.Vertex2
         GL.End()
 
-type GameWindow(title) =
+type GameWindow(title, viewportSize) =
     inherit OpenTK.GameWindow()
     let canvas = Canvas() //@TODO: move to Application
     let mutable onUpdate = fun dt c -> ()
@@ -65,11 +66,33 @@ type GameWindow(title) =
 
     override this.OnResize e =
         base.OnResize e
-        let rect = base.ClientRectangle
-        GL.Viewport(rect.X, rect.Y, rect.Width, rect.Height)
-        let mutable projection = Matrix4.CreateOrthographicOffCenter(0.f, float32 rect.Width, float32 rect.Height, 0.f, -100.f, 100.f)
+
+        let vw, vh = float32 (fst viewportSize), float32 (snd viewportSize)
+        let mutable projection = Matrix4.CreateOrthographic(vw, vh, -100.f, 100.f)
         GL.MatrixMode(MatrixMode.Projection)
         GL.LoadMatrix(&projection)
+
+        // Maximize and center viewport to client area while maintain aspect ratio
+        let clientRect = base.ClientRectangle
+        let cw, ch = float32 (clientRect.Width - clientRect.X), float32 (clientRect.Height - clientRect.Y)
+
+        let mutable vx, vy = 0.f, 0.f
+        let mutable vw, vh = vw, vh
+        let ar = vw / vh
+
+        vw <- ch * ar
+        vh <- ch
+        if vw > cw then
+            vw <- cw
+            vh <- cw / ar
+            vy <- (ch - vh) / 2.f
+        else
+            vx <- (cw - vw) / 2.f
+
+        GL.Viewport(int vx, int vy, int vw, int vh)
+        // Scissor to viewport so that we see black borders outside of viewport area
+        GL.Enable(EnableCap.ScissorTest)
+        GL.Scissor(int vx, int vy, int vw, int vh)
 
 let setGameWindowSize width height (gameWindow:GameWindow) =
     gameWindow.Width <- width
@@ -86,9 +109,9 @@ let centerGameWindow (gameWindow:GameWindow) =
     gameWindow.Y <- (screen.Height - gameWindow.Height) / 2
     gameWindow
 
-type Application(title) =
+type Application(title, viewportSize) =
     let gameWindow =
-        new GameWindow(title)
+        new GameWindow(title, viewportSize)
             |> setGameWindowSizeScreenRatio 0.8
             |> centerGameWindow
     member this.setOnUpdate = gameWindow.setOnUpdate
