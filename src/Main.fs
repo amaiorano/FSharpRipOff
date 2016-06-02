@@ -35,6 +35,7 @@ let defaultActor = {
 let cos = Math.Cos
 let sin = Math.Sin
 let cossin rads :Vec = (cos(rads), sin(rads))
+let twoPI = 2. * Math.PI
 
 let drawVisual (canvas:Canvas) (vis:Visual) =
     vis.vertices |> List.iter canvas.drawVertices
@@ -74,13 +75,13 @@ module ShapeBuilder =
     
     // shape functions return unit-sized shapes centered around the origin
     let square = [ (0.,0.); (0.,1.); (1.,1.); (1.,0.) ] |> center
-    let circle segs = [ for s in 0..segs -> (cossin(2. * Math.PI/(float segs) * (float s))) ]
+    let circle segs = [ for s in 0..segs -> (cossin(twoPI/(float segs) * (float s))) ]
     let triangle = circle 3
 
 
 open ShapeBuilder
 
-let makeShipVisual () =
+let makeTankVisual () =
     let body = square |> scale (28., 16.)
     let turret = triangle |> scale (20., 4.) |> translate (5., 0.)
     let buildWheels size num =
@@ -90,15 +91,23 @@ let makeShipVisual () =
     let wheel2 = wheels |> translate (0., 13.)
     { vertices = [body; wheel1; wheel2; turret] }
 
-
 let add ((x1,y1):Vec) ((x2,y2):Vec) = (x1 + x2, y1 + y2)
+let mul s (x,y) = (x * s, y * s)
 let addMul (x,y) (dx,dy) s = (x + dx * s, y + dy * s)
 let angleToVector degs = cossin(degToRad degs)
 let rotateActor degs actor = {actor with angle = actor.angle + degs}
 
-let rec update (app:Application) (actors:Actor list) (dt:float) (canvas:Canvas) =
+type GameData = {
+    player:Actor;
+    barrels:Actor list;
+    enemies:Actor list;
+}
+
+let allActors gameData = [gameData.player] @ gameData.barrels @ gameData.enemies
+
+let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) =
     // Logic update
-    let player = actors.[0]
+    let player = gameData.player
     
     let turnRate = 360.
     let angleDelta =
@@ -107,10 +116,10 @@ let rec update (app:Application) (actors:Actor list) (dt:float) (canvas:Canvas) 
         else 0.
     let finalAngle = player.angle + angleDelta * dt
 
-    let speedUpRate = 200.
+    let speedUpRate = 300.
     let speedDownRate = -800.
-    let autoSpeedDownRate = -200.
-    let maxSpeed = 400.
+    let autoSpeedDownRate = -300.
+    let maxSpeed = 200.
     let speedDelta =
         if Keyboard.IsDown Key.Up then speedUpRate
         elif Keyboard.IsDown Key.Down then speedDownRate
@@ -128,35 +137,30 @@ let rec update (app:Application) (actors:Actor list) (dt:float) (canvas:Canvas) 
             speed = finalSpeed
         }
 
-    let others = List.tail actors |> List.map (rotateActor (100. * dt))
-    let actors = player :: others
+    let gameData = { gameData with player = player }
 
     // To keep it pure, we need to re-register a new instance of update that
     // binds the udpated actors list
-    app.setOnUpdate (update app actors)
+    app.setOnUpdate (update app gameData)
 
     // Render
     canvas.resetTransform ()
     canvas.clear ()
-    actors |> List.iter (fun (actor) -> drawActor canvas actor)
+    allActors gameData |> List.iter (fun (actor) -> drawActor canvas actor)
 
 
 let main () =
-    let ship = {
-        defaultActor with 
-            pos = (100.,100.)
-            angle = 180.
-            visual = makeShipVisual ()
-    }
-
-    let actors = [
-        {ship with pos=(50.,50.); angle=20.}
-        {ship with pos=(150.,150.); angle=45.}
-        {ship with pos=(250.,250.); angle=95.}
-    ]
+    let player = { defaultActor with pos = (120.,40.); angle = 120.; visual = makeTankVisual() }
+    let barrel = { defaultActor with visual = { vertices = [circle 6 |> scaleUni 10.] } }
     
-    let app = new Application("FSharpRipOff", (800, 600))
-    app.setOnUpdate (update app actors)
+    let numBarrels = 6.
+    let barrelSpread = 50.
+    let barrels = [ for i in 0. .. numBarrels -> { barrel with pos = angleToVector(i * (360./numBarrels)) |> mul barrelSpread } ]
+    
+    let gameData = { player = player; barrels = barrels; enemies = [] }
+    
+    let app = new Application ("FSharpRipOff", (800, 600))
+    app.setOnUpdate (update app gameData)
     app.run ()
 
 main ()
