@@ -15,22 +15,32 @@ let cos = Math.Cos
 let sin = Math.Sin
 let cossin rads = (cos(rads), sin(rads))
 let twoPI = 2. * Math.PI
-
+let normalizeAngle2PI rads = Math.IEEERemainder(rads, twoPI)
+let normalizeAnglePI rads =
+    match (normalizeAngle2PI rads) with
+    | x when x <= Math.PI -> x
+    | x -> twoPI - x
 
 module Vec2 =
     type T = (float * float)
     let add (x1,y1) (x2,y2) = (x1 + x2, y1 + y2)
+    let sub (x1,y1) (x2,y2) = (x1 - x2, y1 - y2)
     let mul s (x,y) = (x * s, y * s)
     let addMul (x,y) (dx,dy) s = (x + dx * s, y + dy * s)    
-    let fromAngle degs = cossin(degToRad degs)
+    let fromAngle rads = cossin(rads)
     let magnitude (x,y) = Math.Sqrt(x*x + y*y)
     let normalize (x,y) =
         let mag = magnitude (x,y)
         assert (mag <> 0.)
         (x / mag, y / mag)
     let dot (x1,y1) (x2,y2) = x1*x2 + y1*y2
-    // returns rads
-    let angleDiff v1 v2 = Math.Acos (dot (normalize(v1)) (normalize(v2)))
+    let cross (x1,y1) (x2,y2) = x1*y2 - y1*x2
+    
+    // returns rads in [0,PI]
+    let shortestAngleDiff v1 v2 = Math.Acos (dot (normalize(v1)) (normalize(v2)))
+
+    // returns angle in [-PI,PI]
+    let signedAngleDiff v1 v2 = Math.Atan2(cross v1 v2, dot v1 v2)
 
 type Vec2List = Vec2.T list
 
@@ -40,7 +50,7 @@ type Visual = {
 
 type Actor = {
     pos:Vec2.T
-    angle:float
+    angle:float // rads
     speed:float
     visual:Visual
 }
@@ -51,19 +61,24 @@ let defaultActor = {
     visual = { vertices = [[]] }
 }
 
+type Player = Actor
+type Barrel = Actor
+
 type EnemyState =
     | Idle
-    | GrabBarrel of barrel:Actor
+    | GrabBarrel
     | Leave
-    | AttackPlayer of player:Actor
+    | AttackPlayer
 
 type Enemy = {
     actor : Actor
     state : EnemyState
+    barrel : Barrel option
 }
 let defaultEnemy = {
     actor = defaultActor
     state = Idle
+    barrel = None
 }
 
 let drawVisual (canvas:Canvas) (vis:Visual) =
@@ -72,7 +87,7 @@ let drawVisual (canvas:Canvas) (vis:Visual) =
 let drawActor (canvas:Canvas) (actor:Actor) =
     canvas.save ()
     canvas.translate actor.pos
-    canvas.rotate (degToRad actor.angle)
+    canvas.rotate (actor.angle)
     drawVisual canvas actor.visual
     canvas.restore ()
 
@@ -134,54 +149,142 @@ module GameVisual =
     let makeBarrel () =
         { vertices = [circle 6 |> scaleUni 10.] }
 
-//let rotateActor degs actor = {actor with angle = actor.angle + degs}
 
 type GameData = {
-    player:Actor;
-    barrels:Actor list;
-    enemies:Enemy list;
+    player:Player;
+    enemies:Enemy list;    
+    barrels:Barrel list;
 }
 
 let allActors gameData = [gameData.player] @ gameData.barrels @ (gameData.enemies |> List.map (fun e -> e.actor))
 
-let movePlayer dt player =
-    let turnRate = 360.
-    let angleDelta =
-        if Keyboard.IsDown Key.Left then turnRate
-        elif Keyboard.IsDown Key.Right then -turnRate
-        else 0.
-    let finalAngle = player.angle + angleDelta * dt
+type SpeedConstants = {
+    speedUpRate:float
+    speedDownRate:float
+    autoSpeedDownRate:float
+    maxSpeed:float
+}
 
-    let speedUpRate = 300.
-    let speedDownRate = -800.
-    let autoSpeedDownRate = -300.
-    let maxSpeed = 200.
+type SpeedAction = Decelerate|Accelerate|Break|Stop
+
+let updateSpeed (c:SpeedConstants) action dt speed =
     let speedDelta =
-        if Keyboard.IsDown Key.Up then speedUpRate
-        elif Keyboard.IsDown Key.Down then speedDownRate
-        else autoSpeedDownRate
-    let finalSpeed = Math.Min(Math.Max(0., player.speed + speedDelta * dt), maxSpeed)
+        match action with
+        | Decelerate -> c.autoSpeedDownRate
+        | Accelerate -> c.speedUpRate
+        | Break -> c.speedDownRate
+        | Stop -> -(speed / dt) // Instant stop
+    let newSpeed = Math.Min(Math.Max(0., speed + speedDelta * dt), c.maxSpeed)
+    newSpeed
 
-    let moveDelta = finalSpeed * dt
-    let forward = Vec2.fromAngle finalAngle
-    let finalPos = Vec2.addMul player.pos forward moveDelta
+type TurnAction = NoTurn|TurnLeft|TurnRight
+
+let updateFacingAngle turnRate action dt angle =
+    let angleDelta =
+        match action with
+        | NoTurn -> 0.
+        | TurnLeft -> turnRate
+        | TurnRight -> -turnRate
+    let finalAngle = angle + angleDelta * dt
+    finalAngle
+
+let playerSpeedConstants = {
+    speedUpRate = 300.
+    speedDownRate = -800.
+    autoSpeedDownRate = -300.
+    maxSpeed = 200.
+}
+
+let enemySpeedConstants = {
+    speedUpRate = 400.
+    speedDownRate = -800.
+    autoSpeedDownRate = -300.
+    maxSpeed = 190.
+}
+
+let integrate speed angle dt pos =
+    let moveDelta = speed * dt
+    let forward = Vec2.fromAngle angle
+    Vec2.addMul pos forward moveDelta
+
+let movePlayer dt player =
+    let actor = player
+    let turnAction =
+        if Keyboard.IsDown Key.Left then TurnLeft
+        elif Keyboard.IsDown Key.Right then TurnRight
+        else NoTurn
+    let turnRate = twoPI
+    let finalAngle = updateFacingAngle turnRate turnAction dt actor.angle
+
+    let speedAction =
+        if Keyboard.IsDown Key.Up then Accelerate
+        elif Keyboard.IsDown Key.Down then Break
+        else Decelerate
+    let speedConstants = playerSpeedConstants
+    let finalSpeed = updateSpeed speedConstants speedAction dt actor.speed
+
+    let finalPos = integrate finalSpeed finalAngle dt actor.pos
     { player with pos = finalPos; angle = finalAngle; speed = finalSpeed }    
 
+// Returns an available barrel or None if none are available
+let tryGetAvailableBarrel (gameData:GameData) :Barrel option =
+    // Return first barrel that no enemy has picked yet
+    let notAvailable = gameData.enemies |> Seq.choose (fun x -> x.barrel) |> set
+    let available = set(gameData.barrels) - notAvailable
+    if Set.isEmpty available then None else Some(Set.minElement available)
+
+let moveEnemy (targetPos:Vec2.T) dt (enemy:Enemy) =
+    let actor = enemy.actor
+    let toTarget = Vec2.sub targetPos (actor.pos)
+    let forward = Vec2.fromAngle actor.angle
+    let angleDelta = (Vec2.signedAngleDiff forward toTarget)
+    let turnAction =
+        match angleDelta with
+        | x when x > 0. -> TurnLeft
+        | x when x < 0. -> TurnRight
+        | _ -> NoTurn
+    let turnRate = 2.*twoPI * ((Math.Abs angleDelta) / Math.PI)
+    let finalAngle = updateFacingAngle turnRate turnAction dt actor.angle
+
+    let speedAction =
+        match (Vec2.magnitude toTarget) with
+        | x when x > 30. -> Accelerate
+        | x when x > 5. -> Decelerate
+        | _ -> Stop
+    let speedConstants = enemySpeedConstants
+    let finalSpeed = updateSpeed speedConstants speedAction dt actor.speed
+    let finalPos = integrate finalSpeed finalAngle dt actor.pos
+    { enemy with actor = { enemy.actor with pos = finalPos; angle = finalAngle; speed = finalSpeed } }
+    
 let updateEnemy dt (gameData:GameData) (enemy:Enemy) =
     let enemy =
         match enemy.state with
-        | Idle -> {enemy with state = GrabBarrel(gameData.barrels.[0])}
-        | GrabBarrel(barrel) ->
-            // Turn and move towards the barrel
-            // If we're close enough, change state to Leave
+        | Idle ->
+            let attackPlayerFirst = false
+            if attackPlayerFirst then
+                { enemy with state = AttackPlayer }
+            else
+                match tryGetAvailableBarrel gameData with
+                | Some(barrel) -> { enemy with barrel = Some(barrel); state = GrabBarrel }
+                | None -> { enemy with state = AttackPlayer }
+        | GrabBarrel ->
+            moveEnemy enemy.barrel.Value.pos dt enemy
+        | Leave ->
             enemy
-        | Leave -> enemy
-        | AttackPlayer(player) -> enemy
-
+        | AttackPlayer ->
+            moveEnemy (gameData.player.pos) dt enemy
     enemy
 
 let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) =
     // Logic update
+
+    // @TODO:
+    // if all enemies dead, create new wave
+    // assign barrels from master list to enemies
+    // update player and enemies
+    // if enemies are dead, put back their barrels into master list
+    // if enemies escaped, remove enemy + barrel
+
     let player = gameData.player |> movePlayer dt
     let enemies = gameData.enemies |> List.map (updateEnemy dt gameData)
 
@@ -196,13 +299,13 @@ let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) 
     allActors gameData |> List.iter (fun (actor) -> drawActor canvas actor)
 
 let main () =
-    let player = { defaultActor with pos = (120.,40.); angle = 120.; visual = GameVisual.makeTank() }
+    let player = { defaultActor with pos = (120.,40.); angle = degToRad 120.; visual = GameVisual.makeTank() }
     let barrel = { defaultActor with visual = GameVisual.makeBarrel() }
     let enemy = { defaultEnemy with actor = { defaultActor with pos = (-200.0, 200.0); visual = GameVisual.makeEnemy() } }
     
     let numBarrels = 6.
     let barrelSpread = 50.
-    let barrels = [ for i in 0. .. numBarrels -> { barrel with pos = Vec2.fromAngle(i * (360./numBarrels)) |> Vec2.mul barrelSpread } ]
+    let barrels = [ for i in 0. .. numBarrels -> { barrel with pos = Vec2.fromAngle(i * (twoPI/numBarrels)) |> Vec2.mul barrelSpread } ]
     
     let gameData = { player = player; barrels = barrels; enemies = [enemy] }
     
