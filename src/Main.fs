@@ -74,11 +74,13 @@ type Enemy = {
     actor : Actor
     state : EnemyState
     barrel : Barrel option
+    dead : Boolean
 }
 let defaultEnemy = {
     actor = defaultActor
     state = Idle
     barrel = None
+    dead = false
 }
 
 let drawVisual (canvas:Canvas) (vis:Visual) =
@@ -156,7 +158,11 @@ type GameData = {
     barrels:Barrel list;
 }
 
-let allActors gameData = [gameData.player] @ gameData.barrels @ (gameData.enemies |> List.map (fun e -> e.actor))
+let allActors gameData =
+    [gameData.player] 
+    @ gameData.barrels 
+    @ (gameData.enemies |> List.map (fun e -> e.actor))
+    @ (gameData.enemies |> List.choose (fun e -> e.barrel))
 
 type SpeedConstants = {
     speedUpRate:float
@@ -226,13 +232,6 @@ let movePlayer dt player =
     let finalPos = integrate finalSpeed finalAngle dt actor.pos
     { player with pos = finalPos; angle = finalAngle; speed = finalSpeed }    
 
-// Returns an available barrel or None if none are available
-let tryGetAvailableBarrel (gameData:GameData) :Barrel option =
-    // Return first barrel that no enemy has picked yet
-    let notAvailable = gameData.enemies |> Seq.choose (fun x -> x.barrel) |> set
-    let available = set(gameData.barrels) - notAvailable
-    if Set.isEmpty available then None else Some(Set.minElement available)
-
 let moveEnemy (targetPos:Vec2.T) dt (enemy:Enemy) =
     let actor = enemy.actor
     let toTarget = Vec2.sub targetPos (actor.pos)
@@ -256,37 +255,53 @@ let moveEnemy (targetPos:Vec2.T) dt (enemy:Enemy) =
     let finalPos = integrate finalSpeed finalAngle dt actor.pos
     { enemy with actor = { enemy.actor with pos = finalPos; angle = finalAngle; speed = finalSpeed } }
     
-let updateEnemy dt (gameData:GameData) (enemy:Enemy) =
+let updateEnemy (dt:float) (player:Player) (enemy:Enemy) =
     let enemy =
         match enemy.state with
         | Idle ->
-            let attackPlayerFirst = false
-            if attackPlayerFirst then
-                { enemy with state = AttackPlayer }
-            else
-                match tryGetAvailableBarrel gameData with
-                | Some(barrel) -> { enemy with barrel = Some(barrel); state = GrabBarrel }
-                | None -> { enemy with state = AttackPlayer }
+            match enemy.barrel with
+            | Some(barrel) -> {enemy with state = GrabBarrel}
+            | None -> {enemy with state = AttackPlayer}
         | GrabBarrel ->
             moveEnemy enemy.barrel.Value.pos dt enemy
         | Leave ->
             enemy
         | AttackPlayer ->
-            moveEnemy (gameData.player.pos) dt enemy
+            moveEnemy (player.pos) dt enemy
     enemy
+
+let makeEnemyWave () =
+    let enemy = {defaultEnemy with actor = {defaultActor with visual = GameVisual.makeEnemy()}}
+    let positions = ShapeBuilder.circle 10 |> ShapeBuilder.scaleUni 300.
+    [for i in 0..10 -> {enemy with actor = {enemy.actor with pos = positions.[i]}}]
+
+let allEnemiesDead (enemies:Enemy list) = enemies.IsEmpty || enemies |> List.forall (fun e -> e.dead)
 
 let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) =
     // Logic update
 
     // @TODO:
     // if all enemies dead, create new wave
-    // assign barrels from master list to enemies
-    // update player and enemies
-    // if enemies are dead, put back their barrels into master list
-    // if enemies escaped, remove enemy + barrel
+    let enemies,barrels =
+        if allEnemiesDead gameData.enemies then
+            let enemies = makeEnemyWave()
+            // assign barrels from master list to new wave
+            let barrels = gameData.barrels
+            let num = Math.Min (enemies.Length, barrels.Length)
+            let enemies = enemies |> List.mapi (fun i e -> if i < num then {e with barrel = Some(barrels.[i])} else e)
+            let barrels = barrels |> List.skip num // Remove assigned barrels
+            (enemies,barrels)
+        else
+            (gameData.enemies,gameData.barrels)
 
+    let gameData = {gameData with enemies=enemies; barrels=barrels}
+
+    // update player and enemies
     let player = gameData.player |> movePlayer dt
-    let enemies = gameData.enemies |> List.map (updateEnemy dt gameData)
+    let enemies = gameData.enemies |> List.map (updateEnemy dt player)
+
+    //@TODO: if enemies are dead, put back their barrels into master list
+    //@TODO: if enemies escaped, remove enemy + barrel
 
     // To keep it pure, we need to re-register a new instance of update that
     // binds the updated gameData
@@ -301,13 +316,13 @@ let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) 
 let main () =
     let player = { defaultActor with pos = (120.,40.); angle = degToRad 120.; visual = GameVisual.makeTank() }
     let barrel = { defaultActor with visual = GameVisual.makeBarrel() }
-    let enemy = { defaultEnemy with actor = { defaultActor with pos = (-200.0, 200.0); visual = GameVisual.makeEnemy() } }
+    let enemy = []
     
     let numBarrels = 6.
     let barrelSpread = 50.
-    let barrels = [ for i in 0. .. numBarrels -> { barrel with pos = Vec2.fromAngle(i * (twoPI/numBarrels)) |> Vec2.mul barrelSpread } ]
+    let barrels = [ for i in 0. .. (numBarrels-1.) -> { barrel with pos = Vec2.fromAngle(i * (twoPI/numBarrels)) |> Vec2.mul barrelSpread } ]
     
-    let gameData = { player = player; barrels = barrels; enemies = [enemy] }
+    let gameData = { player = player; barrels = barrels; enemies = [] }//[enemy] }
     
     let app = new Application ("FSharpRipOff", (800, 600))
     app.setOnUpdate (update app gameData)
