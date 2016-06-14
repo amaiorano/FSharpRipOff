@@ -35,6 +35,7 @@ module Vec2 =
         (x / mag, y / mag)
     let dot (x1,y1) (x2,y2) = x1*x2 + y1*y2
     let cross (x1,y1) (x2,y2) = x1*y2 - y1*x2
+    let distance v1 v2 = magnitude (sub v1 v2)
     
     // returns rads in [0,PI]
     let shortestAngleDiff v1 v2 = Math.Acos (dot (normalize(v1)) (normalize(v2)))
@@ -72,12 +73,14 @@ type EnemyState =
 
 type Enemy = {
     actor : Actor
+    spawnPos : Vec2.T
     state : EnemyState
     barrel : Barrel option
     dead : Boolean
 }
 let defaultEnemy = {
     actor = defaultActor
+    spawnPos = (0.,0.)
     state = Idle
     barrel = None
     dead = false
@@ -263,9 +266,18 @@ let updateEnemy (dt:float) (player:Player) (enemy:Enemy) =
             | Some(barrel) -> {enemy with state = GrabBarrel}
             | None -> {enemy with state = AttackPlayer}
         | GrabBarrel ->
-            moveEnemy enemy.barrel.Value.pos dt enemy
+            let barrel = enemy.barrel.Value
+            match Vec2.distance (enemy.actor.pos) (barrel.pos) with
+            | x when x < 10. -> {enemy with state = Leave}
+            | _ -> moveEnemy barrel.pos dt enemy
         | Leave ->
-            enemy
+            match Vec2.distance (enemy.actor.pos) (enemy.spawnPos) with
+            | x when x < 10. ->
+                enemy //@TODO "destroy enemy and barrel"
+            | _ ->
+                let e = moveEnemy enemy.spawnPos dt enemy
+                let barrel = {e.barrel.Value with pos = e.actor.pos}
+                { e with barrel = Some(barrel) }
         | AttackPlayer ->
             moveEnemy (player.pos) dt enemy
     enemy
@@ -273,7 +285,7 @@ let updateEnemy (dt:float) (player:Player) (enemy:Enemy) =
 let makeEnemyWave () =
     let enemy = {defaultEnemy with actor = {defaultActor with visual = GameVisual.makeEnemy()}}
     let positions = ShapeBuilder.circle 10 |> ShapeBuilder.scaleUni 300.
-    [for i in 0..10 -> {enemy with actor = {enemy.actor with pos = positions.[i]}}]
+    [for i in 0..10 -> {enemy with spawnPos = positions.[i]; actor = {enemy.actor with pos = positions.[i]}}]
 
 let allEnemiesDead (enemies:Enemy list) = enemies.IsEmpty || enemies |> List.forall (fun e -> e.dead)
 
