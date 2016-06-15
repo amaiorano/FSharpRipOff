@@ -11,6 +11,9 @@ open System
 
 let swapArgs f a b = f b a
 
+let min (x:float) (y:float) = Math.Min(x,y)
+let max (x:float) (y:float) = Math.Max(x,y)
+let clamp minV maxV v = v |> max minV |> min maxV
 let cos = Math.Cos
 let sin = Math.Sin
 let cossin rads = (cos(rads), sin(rads))
@@ -96,12 +99,7 @@ let drawActor (canvas:Canvas) (actor:Actor) =
     drawVisual canvas actor.visual
     canvas.restore ()
 
-// Returns a single list of all elements in a list of lists
-// e.g. [[1;2]; [3;4]] -> [1;2;3;4]
-let flattenListList (x:'a list list) = x |> List.reduce List.append
-
-
-module ShapeBuilder =
+module Shape =
     let scale (x,y) verts = verts |> List.map(fun (x',y') -> (x'*x, y'*y))
     let scaleUni s verts = scale (s,s) verts
     let translate (x,y) verts = verts |> List.map(fun (x',y') -> (x'+x, y'+y))
@@ -112,7 +110,7 @@ module ShapeBuilder =
         let rec f (v:Vec2List) (minX,minY,maxX,maxY) =
             match v with
             | [] -> (minX,minY,maxX,maxY)
-            | (hx,hy) :: tail -> f tail (Math.Min(hx,minX), Math.Min(hy,minY), Math.Max(hx,maxX), Math.Max(hy,maxY))
+            | (hx,hy) :: tail -> f tail (min hx minX, min hy minY, max hx maxX, max hy maxY)
         f v (0.,0.,0.,0.)
 
     // returns center point of input extents (as Vec2)
@@ -122,15 +120,15 @@ module ShapeBuilder =
 
     // returns new Vec2List translated so that its midpoint is (0,0) in local space
     let center (v:Vec2List) = translateInv (midpoint v) v
-    
+
     // shape functions return unit-sized shapes centered around the origin
     let square = [ (0.,0.); (0.,1.); (1.,1.); (1.,0.) ] |> center
-    let circle segs = [ for s in 0..segs -> (cossin(twoPI/(float segs) * (float s))) ]
+    let circle segs = [ for s in 0..segs-1 -> (cossin(twoPI/(float segs) * (float s))) ]
     let triangle = circle 3
 
 
 module GameVisual =
-    open ShapeBuilder
+    open Shape
 
     let makeTank () =
         let body = square |> scale (28., 16.)
@@ -183,7 +181,7 @@ let updateSpeed (c:SpeedConstants) action dt speed =
         | Accelerate -> c.speedUpRate
         | Break -> c.speedDownRate
         | Stop -> -(speed / dt) // Instant stop
-    let newSpeed = Math.Min(Math.Max(0., speed + speedDelta * dt), c.maxSpeed)
+    let newSpeed = speed + speedDelta * dt |> clamp 0. c.maxSpeed
     newSpeed
 
 type TurnAction = NoTurn|TurnLeft|TurnRight
@@ -205,10 +203,10 @@ let playerSpeedConstants = {
 }
 
 let enemySpeedConstants = {
-    speedUpRate = 400.
+    speedUpRate = 300.
     speedDownRate = -800.
     autoSpeedDownRate = -300.
-    maxSpeed = 190.
+    maxSpeed = 150.
 }
 
 let integrate speed angle dt pos =
@@ -283,16 +281,16 @@ let updateEnemy (dt:float) (player:Player) (enemy:Enemy) =
     enemy
 
 let makeEnemyWave () =
+    let numEnemies = 2
     let enemy = {defaultEnemy with actor = {defaultActor with visual = GameVisual.makeEnemy()}}
-    let positions = ShapeBuilder.circle 10 |> ShapeBuilder.scaleUni 300.
-    [for i in 0..10 -> {enemy with spawnPos = positions.[i]; actor = {enemy.actor with pos = positions.[i]}}]
+    let positions = Shape.circle numEnemies |> Shape.scaleUni 300.
+    [for i in 0..positions.Length-1 -> {enemy with spawnPos = positions.[i]; actor = {enemy.actor with pos = positions.[i]}}]
 
 let allEnemiesDead (enemies:Enemy list) = enemies.IsEmpty || enemies |> List.forall (fun e -> e.dead)
 
 let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) =
     // Logic update
 
-    // @TODO:
     // if all enemies dead, create new wave
     let enemies,barrels =
         if allEnemiesDead gameData.enemies then
@@ -327,14 +325,12 @@ let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) 
 
 let main () =
     let player = { defaultActor with pos = (120.,40.); angle = degToRad 120.; visual = GameVisual.makeTank() }
-    let barrel = { defaultActor with visual = GameVisual.makeBarrel() }
-    let enemy = []
     
-    let numBarrels = 6.
-    let barrelSpread = 50.
-    let barrels = [ for i in 0. .. (numBarrels-1.) -> { barrel with pos = Vec2.fromAngle(i * (twoPI/numBarrels)) |> Vec2.mul barrelSpread } ]
+    let barrel = { defaultActor with visual = GameVisual.makeBarrel() }    
+    let barrelPositions = Shape.circle 6 |> Shape.scaleUni 50.
+    let barrels = [for i in 1..barrelPositions.Length -> { barrel with pos = barrelPositions.[i-1] }]
     
-    let gameData = { player = player; barrels = barrels; enemies = [] }//[enemy] }
+    let gameData = { player = player; barrels = barrels; enemies = [] }
     
     let app = new Application ("FSharpRipOff", (800, 600))
     app.setOnUpdate (update app gameData)
