@@ -10,6 +10,7 @@ open OpenTKPlatform
 open System
 
 let swapArgs f a b = f b a
+let castTuple t (a,b) = (t a, t b)
 
 let min (x:float) (y:float) = Math.Min(x,y)
 let max (x:float) (y:float) = Math.Max(x,y)
@@ -47,6 +48,11 @@ module Vec2 =
     let signedAngleDiff v1 v2 = Math.Atan2(cross v1 v2, dot v1 v2)
 
 type Vec2List = Vec2.T list
+
+// Game-specific
+
+let screenSize = 800.,600.
+let screenRect = (-fst(screenSize)/2., -snd(screenSize)/2., fst(screenSize)/2., snd(screenSize)/2.)
 
 type Visual = {
     vertices:Vec2List list
@@ -120,6 +126,9 @@ module Shape =
 
     // returns new Vec2List translated so that its midpoint is (0,0) in local space
     let center (v:Vec2List) = translateInv (midpoint v) v
+
+    let shrinkToRect (minX,minY,maxX,maxY) (v:Vec2List) =
+        v |> List.map (fun (x,y) -> x |> clamp minX maxX, y |> clamp minY maxY)
 
     // shape functions return unit-sized shapes centered around the origin
     let square = [ (0.,0.); (0.,1.); (1.,1.); (1.,0.) ] |> center
@@ -283,7 +292,10 @@ let updateEnemy (dt:float) (player:Player) (enemy:Enemy) =
 let makeEnemyWave () =
     let numEnemies = 2
     let enemy = {defaultEnemy with actor = {defaultActor with visual = GameVisual.makeEnemy()}}
-    let positions = Shape.circle numEnemies |> Shape.scaleUni 300.
+    // Spawn at points around the screen rect
+    let offset = 30.
+    let spawnRect = match screenRect with (left,bottom,right,top) -> left - offset, bottom - offset, right + offset, top + offset
+    let positions = Shape.circle numEnemies |> Shape.scaleUni 1000. |> Shape.shrinkToRect spawnRect
     [for i in 0..positions.Length-1 -> {enemy with spawnPos = positions.[i]; actor = {enemy.actor with pos = positions.[i]}}]
 
 let allEnemiesDead (enemies:Enemy list) = enemies.IsEmpty || enemies |> List.forall (fun e -> e.dead)
@@ -332,7 +344,7 @@ let main () =
     
     let gameData = { player = player; barrels = barrels; enemies = [] }
     
-    let app = new Application ("FSharpRipOff", (800, 600))
+    let app = new Application ("FSharpRipOff", screenSize |> castTuple int)
     app.setOnUpdate (update app gameData)
     app.run ()
 
