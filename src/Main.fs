@@ -70,6 +70,8 @@ type Player = Actor
 
 type Barrel = Actor
 
+type Bullet = Actor
+
 type EnemyState = 
     | Idle
     | GrabBarrel
@@ -135,6 +137,10 @@ module Shape =
         [ for s in 0..segs - 1 -> (cossin (twoPI / (float segs) * (float s))) ]
     
     let triangle = circle 3
+    
+    let line length = 
+        [ (-length / 2., 0.)
+          (length / 2., 0.) ]
 
 module GameVisual = 
     open Shape
@@ -171,16 +177,22 @@ module GameVisual =
         { vertices = [ body; body2; turret1; turret2 ] }
     
     let makeBarrel() = { vertices = [ circle 6 |> scaleUni 10. ] }
+    let makeBullet() = { vertices = [ line 2. ] }
+
+let defaultBullet : Bullet = { defaultActor with visual = GameVisual.makeBullet() }
 
 type GameData = 
     { player : Player
       enemies : Enemy list
-      barrels : Barrel list }
+      barrels : Barrel list
+      bullets : Bullet list
+      bulletFireTimeOut : float }
 
 let allActors gameData = 
     [ gameData.player ] 
     @ gameData.barrels 
-      @ (gameData.enemies |> List.map (fun e -> e.actor)) @ (gameData.enemies |> List.choose (fun e -> e.barrel))
+      @ (gameData.enemies |> List.map (fun e -> e.actor)) 
+        @ (gameData.enemies |> List.choose (fun e -> e.barrel)) @ gameData.bullets
 
 type SpeedConstants = 
     { speedUpRate : float
@@ -333,6 +345,13 @@ let makeEnemyWave() =
 let enemyEscaped enemy = enemy.state = Leave && isNearPosition enemy.actor.pos enemy.spawnPos
 let allEnemiesDead (enemies : Enemy list) = enemies.IsEmpty || enemies |> List.forall (fun e -> e.dead)
 
+let intersectsPointRect point rect = 
+    let x, y = point
+    let x1, y1, x2, y2 = rect
+    x >= x1 && x <= x2 && y >= y1 && y <= y2
+
+let isActorOnScreen (actor : Actor) = intersectsPointRect actor.pos screenRect
+
 let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : Canvas) = 
     // Logic update
     // If all enemies dead, create new wave
@@ -356,9 +375,34 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
         { gameData with enemies = enemies
                         barrels = barrels }
     
-    // Update player and enemies
+    // Update player
     let player = gameData.player |> movePlayer dt
+    // Handle bullets
+    let bulletSpeed = 300.
+    let bullFireInterval = 0.2
+    let bulletFireTimeOut = max 0. (gameData.bulletFireTimeOut - dt)
+    
+    let newBullet = 
+        if bulletFireTimeOut = 0. && Keyboard.IsDown Key.Space then 
+            Some { defaultBullet with pos = player.pos
+                                      angle = player.angle }
+        else None
+    
+    let bulletFireTimeOut = 
+        if bulletFireTimeOut = 0. then bullFireInterval
+        else bulletFireTimeOut
+    
+    let bullets = gameData.bullets @ Option.toList newBullet
+    
+    let bullets = 
+        bullets
+        |> List.map (fun b -> { b with pos = integrate bulletSpeed b.angle dt b.pos })
+        |> List.filter isActorOnScreen
+    
+    // Update enemies
     let enemies = gameData.enemies |> List.map (updateEnemy dt player)
+    
+    //@TODO: Check for enemy-bullet collisions
     
     // If enemies are dead, put back their barrels into master list
     let barrelsReleased = 
@@ -375,7 +419,9 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let gameData = 
         { gameData with player = player
                         enemies = enemies
-                        barrels = barrels }
+                        barrels = barrels
+                        bullets = bullets
+                        bulletFireTimeOut = bulletFireTimeOut }
     app.setOnUpdate (update app gameData)
     // Render
     canvas.resetTransform()
@@ -397,7 +443,9 @@ let main() =
     let gameData = 
         { player = player
           barrels = barrels
-          enemies = [] }
+          enemies = []
+          bullets = []
+          bulletFireTimeOut = 0. }
     
     let app = new Application("FSharpRipOff", screenSize |> castTuple int)
     app.setOnUpdate (update app gameData)
