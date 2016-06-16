@@ -223,6 +223,8 @@ let integrate speed angle dt pos =
     let forward = Vec2.fromAngle angle
     Vec2.addMul pos forward moveDelta
 
+let isNearPosition pos1 pos2 = Vec2.distance pos1 pos2 < 10.
+
 let movePlayer dt player =
     let actor = player
     let turnAction =
@@ -274,14 +276,14 @@ let updateEnemy (dt:float) (player:Player) (enemy:Enemy) =
             | None -> {enemy with state = AttackPlayer}
         | GrabBarrel ->
             let barrel = enemy.barrel.Value
-            match Vec2.distance (enemy.actor.pos) (barrel.pos) with
-            | x when x < 10. -> {enemy with state = Leave}
-            | _ -> moveEnemy barrel.pos dt enemy
+            if isNearPosition (enemy.actor.pos) (barrel.pos) then
+                {enemy with state = Leave}
+            else
+                moveEnemy barrel.pos dt enemy
         | Leave ->
-            match Vec2.distance (enemy.actor.pos) (enemy.spawnPos) with
-            | x when x < 10. ->
+            if isNearPosition (enemy.actor.pos) (enemy.spawnPos) then
                 enemy //@TODO "destroy enemy and barrel"
-            | _ ->
+            else
                 let e = moveEnemy enemy.spawnPos dt enemy
                 let barrel = {e.barrel.Value with pos = e.actor.pos}
                 { e with barrel = Some(barrel) }
@@ -298,12 +300,14 @@ let makeEnemyWave () =
     let positions = Shape.circle numEnemies |> Shape.scaleUni 1000. |> Shape.shrinkToRect spawnRect
     [for i in 0..positions.Length-1 -> {enemy with spawnPos = positions.[i]; actor = {enemy.actor with pos = positions.[i]}}]
 
+let enemyEscaped enemy = enemy.state = Leave && isNearPosition enemy.actor.pos enemy.spawnPos
+
 let allEnemiesDead (enemies:Enemy list) = enemies.IsEmpty || enemies |> List.forall (fun e -> e.dead)
 
 let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) =
     // Logic update
 
-    // if all enemies dead, create new wave
+    // If all enemies dead, create new wave
     let enemies,barrels =
         if allEnemiesDead gameData.enemies then
             let enemies = makeEnemyWave()
@@ -318,16 +322,20 @@ let rec update (app:Application) (gameData:GameData) (dt:float) (canvas:Canvas) 
 
     let gameData = {gameData with enemies=enemies; barrels=barrels}
 
-    // update player and enemies
+    // Update player and enemies
     let player = gameData.player |> movePlayer dt
     let enemies = gameData.enemies |> List.map (updateEnemy dt player)
 
-    //@TODO: if enemies are dead, put back their barrels into master list
-    //@TODO: if enemies escaped, remove enemy + barrel
+    // If enemies are dead, put back their barrels into master list
+    let barrelsReleased = enemies |> List.choose (fun e -> if e.dead then e.barrel else None)
+    let barrels = gameData.barrels @ barrelsReleased
+    
+    // If enemies escaped, remove enemy (along with its barrel)
+    let enemies = enemies |> List.filter (fun e -> not (enemyEscaped e))
 
     // To keep it pure, we need to re-register a new instance of update that
     // binds the updated gameData
-    let gameData = { gameData with player = player; enemies = enemies }
+    let gameData = { gameData with player = player; enemies = enemies; barrels = barrels }
     app.setOnUpdate (update app gameData)
 
     // Render
