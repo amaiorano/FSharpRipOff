@@ -352,6 +352,15 @@ let intersectsPointRect point rect =
 
 let isActorOnScreen (actor : Actor) = intersectsPointRect actor.pos screenRect
 
+// Returns sequence of tuples (x,y) for which predicate returns true for all permutations of list1 and list2
+let choosePermute2 predicate list1 list2 = 
+    let len1 = List.length list1
+    let len2 = List.length list2
+    let tuples = Seq.init (len1 * len2) (fun i -> list1.[i / len2], list2.[i % len2])
+    tuples |> Seq.choose (fun t -> 
+                  if predicate t then Some(t)
+                  else None)
+
 let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : Canvas) = 
     // Logic update
     // If all enemies dead, create new wave
@@ -377,7 +386,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     
     // Update player
     let player = gameData.player |> movePlayer dt
-    // Handle bullets
+    // Update bullets
     let bulletSpeed = 300.
     let bullFireInterval = 0.2
     let bulletFireTimeOut = max 0. (gameData.bulletFireTimeOut - dt)
@@ -401,15 +410,29 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     
     // Update enemies
     let enemies = gameData.enemies |> List.map (updateEnemy dt player)
+    // Check for enemy-bullet collisions
+    let collisionTest (bullet, enemy) = Vec2.distance bullet.pos enemy.actor.pos < 30.
+    let collisions = choosePermute2 collisionTest bullets enemies
     
-    //@TODO: Check for enemy-bullet collisions
+    let deadBullets = 
+        seq { 
+            for t in collisions -> fst (t)
+        }
     
-    // If enemies are dead, put back their barrels into master list
+    let deadEnemies = 
+        seq { 
+            for t in collisions -> snd (t)
+        }
+    
+    // Put barrels of dead enemies back into master list
     let barrelsReleased = 
-        enemies |> List.choose (fun e -> 
-                       if e.dead then e.barrel
-                       else None)
+        deadEnemies
+        |> Seq.choose (fun e -> e.barrel)
+        |> List.ofSeq
     
+    // Remove dead bullets and enemies from master lists
+    let bullets = set bullets - set deadBullets |> List.ofSeq
+    let enemies = set enemies - set deadEnemies |> List.ofSeq
     let barrels = gameData.barrels @ barrelsReleased
     // If enemies escaped, remove enemy (along with its barrel)
     let enemies = enemies |> List.filter (fun e -> not (enemyEscaped e))
