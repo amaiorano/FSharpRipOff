@@ -82,15 +82,13 @@ type Enemy =
     { actor : Actor
       spawnPos : Vec2.T
       state : EnemyState
-      barrel : Barrel option
-      dead : Boolean }
+      barrel : Barrel option }
 
 let defaultEnemy = 
     { actor = defaultActor
       spawnPos = (0., 0.)
       state = Idle
-      barrel = None
-      dead = false }
+      barrel = None }
 
 let drawVisual (canvas : Canvas) (vis : Visual) = vis.vertices |> List.iter canvas.drawVertices
 
@@ -232,17 +230,23 @@ let updateFacingAngle turnRate action dt angle =
     let finalAngle = angle + angleDelta * dt
     finalAngle
 
+// Game constants
 let playerSpeedConstants = 
-    { speedUpRate = 300.
+    { speedUpRate = 400.
       speedDownRate = -800.
       autoSpeedDownRate = -300.
-      maxSpeed = 200. }
+      maxSpeed = 250. }
 
 let enemySpeedConstants = 
     { speedUpRate = 300.
       speedDownRate = -800.
       autoSpeedDownRate = -300.
       maxSpeed = 150. }
+
+let bulletSpeed = 400.
+let bullFireInterval = 0.2
+let barrelStartCount = 6
+let barrelStartPosRadius = 50.
 
 let integrate speed angle dt pos = 
     let moveDelta = speed * dt
@@ -343,7 +347,7 @@ let makeEnemyWave() =
                        actor = { enemy.actor with pos = positions.[i] } } ]
 
 let enemyEscaped enemy = enemy.state = Leave && isNearPosition enemy.actor.pos enemy.spawnPos
-let allEnemiesDead (enemies : Enemy list) = enemies.IsEmpty || enemies |> List.forall (fun e -> e.dead)
+let allEnemiesDead (enemies : Enemy list) = enemies.IsEmpty
 
 let intersectsPointRect point rect = 
     let x, y = point
@@ -387,8 +391,6 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // Update player
     let player = gameData.player |> movePlayer dt
     // Update bullets
-    let bulletSpeed = 300.
-    let bullFireInterval = 0.2
     let bulletFireTimeOut = max 0. (gameData.bulletFireTimeOut - dt)
     
     let newBullet = 
@@ -458,7 +460,7 @@ let main() =
                             visual = GameVisual.makeTank() }
     
     let barrel = { defaultActor with visual = GameVisual.makeBarrel() }
-    let barrelPositions = Shape.circle 6 |> Shape.scaleUni 50.
+    let barrelPositions = Shape.circle barrelStartCount |> Shape.scaleUni barrelStartPosRadius
     
     let barrels = 
         [ for i in 1..barrelPositions.Length -> { barrel with pos = barrelPositions.[i - 1] } ]
