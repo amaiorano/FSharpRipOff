@@ -319,11 +319,9 @@ let updateEnemy (dt : float) (player : Player) (enemy : Enemy) =
             if isNearPosition (enemy.actor.pos) (barrel.pos) then { enemy with state = Leave }
             else moveEnemy barrel.pos dt enemy
         | Leave -> 
-            if isNearPosition (enemy.actor.pos) (enemy.spawnPos) then enemy //@TODO "destroy enemy and barrel"
-            else 
-                let e = moveEnemy enemy.spawnPos dt enemy
-                let barrel = { e.barrel.Value with pos = e.actor.pos }
-                { e with barrel = Some(barrel) }
+            let e = moveEnemy enemy.spawnPos dt enemy
+            let barrel = { e.barrel.Value with pos = e.actor.pos }
+            { e with barrel = Some(barrel) }
         | AttackPlayer -> moveEnemy (player.pos) dt enemy
     enemy
 
