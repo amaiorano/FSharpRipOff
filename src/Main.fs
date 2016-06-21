@@ -390,15 +390,16 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let player = gameData.player |> movePlayer dt
     // Update bullets
     let bulletFireTimeOut = max 0. (gameData.bulletFireTimeOut - dt)
+    let fireBullet = bulletFireTimeOut = 0. && Keyboard.IsDown Key.Space
     
     let newBullet = 
-        if bulletFireTimeOut = 0. && Keyboard.IsDown Key.Space then 
+        if fireBullet then 
             Some { defaultBullet with pos = player.pos
                                       angle = player.angle }
         else None
     
     let bulletFireTimeOut = 
-        if bulletFireTimeOut = 0. then bullFireInterval
+        if fireBullet then bullFireInterval
         else bulletFireTimeOut
     
     let bullets = gameData.bullets @ Option.toList newBullet
