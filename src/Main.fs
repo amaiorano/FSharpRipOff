@@ -175,7 +175,7 @@ module GameVisual =
         { vertices = [ body; body2; turret1; turret2 ] }
     
     let makeBarrel() = { vertices = [ circle 6 |> scaleUni 10. ] }
-    let makeBullet() = { vertices = [ line 2. ] }
+    let makeBullet() = { vertices = [ square |> scale (4., 2.) ] }
 
 let defaultBullet : Bullet = { defaultActor with visual = GameVisual.makeBullet() }
 
