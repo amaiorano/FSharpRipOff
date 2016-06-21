@@ -361,9 +361,7 @@ let choosePermute2 predicate list1 list2 =
     let len1 = List.length list1
     let len2 = List.length list2
     let tuples = Seq.init (len1 * len2) (fun i -> list1.[i / len2], list2.[i % len2])
-    tuples |> Seq.choose (fun t -> 
-                  if predicate t then Some(t)
-                  else None)
+    tuples |> Seq.filter predicate
 
 let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : Canvas) = 
     // Logic update
