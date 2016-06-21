@@ -374,13 +374,19 @@ let choosePermute2 predicate list1 list2 =
     tuples |> Seq.filter predicate
 
 let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : Canvas) = 
+    let player = gameData.player
+    let enemies = gameData.enemies
+    let barrels = gameData.barrels
+    let bullets = gameData.bullets
+    let bulletFireTimeOut = gameData.bulletFireTimeOut
+
     // Logic update
     // If all enemies dead, create new wave
     let enemies, barrels = 
-        if allEnemiesDead gameData.enemies then 
+        if allEnemiesDead enemies then 
             let enemies = makeEnemyWave()
             // assign barrels from master list to new wave
-            let barrels = gameData.barrels
+            let barrels = barrels
             let num = Math.Min(enemies.Length, barrels.Length)
             
             let enemies = 
@@ -390,16 +396,12 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
             
             let barrels = barrels |> List.skip num // Remove assigned barrels
             (enemies, barrels)
-        else (gameData.enemies, gameData.barrels)
-    
-    let gameData = 
-        { gameData with enemies = enemies
-                        barrels = barrels }
+        else (enemies, barrels)
     
     // Update player
-    let player = gameData.player |> movePlayer dt
+    let player = player |> movePlayer dt
     // Update bullets
-    let bulletFireTimeOut = max 0. (gameData.bulletFireTimeOut - dt)
+    let bulletFireTimeOut = max 0. (bulletFireTimeOut - dt)
     let fireBullet = bulletFireTimeOut = 0. && Keyboard.IsDown Key.Space
     
     let newBullet = 
@@ -412,7 +414,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
         if fireBullet then bullFireInterval
         else bulletFireTimeOut
     
-    let bullets = gameData.bullets @ Option.toList newBullet
+    let bullets = bullets @ Option.toList newBullet
     
     let bullets = 
         bullets
@@ -420,7 +422,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
         |> List.filter isActorOnScreen
     
     // Update enemies
-    let enemies = gameData.enemies |> List.map (updateEnemy dt player)
+    let enemies = enemies |> List.map (updateEnemy dt player)
     // Check for enemy-bullet collisions
     let collisionTest (actor, enemy) = Vec2.distance actor.pos enemy.actor.pos < 30.
     let collisions = choosePermute2 collisionTest bullets enemies
@@ -455,7 +457,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
         |> Seq.choose (fun e -> e.barrel)
         |> List.ofSeq
     
-    let barrels = gameData.barrels @ barrelsReleased
+    let barrels = barrels @ barrelsReleased
     // Remove dead bullets and enemies
     let bullets = bullets |> List.filterOut deadBullets.Contains
     let enemies = enemies |> List.filterOut deadEnemies.Contains
