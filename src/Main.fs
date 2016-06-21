@@ -1,6 +1,13 @@
 ﻿open OpenTKPlatform
 open System
 
+module List = 
+    let filterOut predicate list = 
+        list |> List.filter (fun x -> 
+                    x
+                    |> predicate
+                    |> not)
+
 let swapArgs f a b = f b a
 let castTuple t (a, b) = (t a, t b)
 let min (x : float) (y : float) = Math.Min(x, y)
@@ -278,6 +285,11 @@ let movePlayer dt player =
                   angle = finalAngle
                   speed = finalSpeed }
 
+let makePlayer() = 
+    { defaultActor with pos = (120., 40.)
+                        angle = degToRad 120.
+                        visual = GameVisual.makeTank() }
+
 let moveEnemy (targetPos : Vec2.T) dt (enemy : Enemy) = 
     let actor = enemy.actor
     let toTarget = Vec2.sub targetPos (actor.pos)
@@ -410,18 +422,32 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // Update enemies
     let enemies = gameData.enemies |> List.map (updateEnemy dt player)
     // Check for enemy-bullet collisions
-    let collisionTest (bullet, enemy) = Vec2.distance bullet.pos enemy.actor.pos < 30.
+    let collisionTest (actor, enemy) = Vec2.distance actor.pos enemy.actor.pos < 30.
     let collisions = choosePermute2 collisionTest bullets enemies
     
     let deadBullets = 
-        seq { 
-            for t in collisions -> fst (t)
-        }
+        collisions
+        |> Seq.map fst
+        |> set
     
     let deadEnemies = 
-        seq { 
-            for t in collisions -> snd (t)
-        }
+        collisions
+        |> Seq.map snd
+        |> set
+    
+    // Check for player-enemy collisions
+    let enemyCollidingWithPlayer = enemies |> List.tryFind (fun e -> collisionTest (player, e))
+    
+    // Kill first enemy that collides with player
+    let deadEnemies = 
+        match enemyCollidingWithPlayer with
+        | Some(e) -> deadEnemies.Add(e)
+        | None -> deadEnemies
+    
+    // Kill player if it collided with enemy
+    let player = 
+        if enemyCollidingWithPlayer.IsSome then makePlayer()
+        else player
     
     // Put barrels of dead enemies back into master list
     let barrelsReleased = 
@@ -429,10 +455,10 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
         |> Seq.choose (fun e -> e.barrel)
         |> List.ofSeq
     
-    // Remove dead bullets and enemies from master lists
-    let bullets = set bullets - set deadBullets |> List.ofSeq
-    let enemies = set enemies - set deadEnemies |> List.ofSeq
     let barrels = gameData.barrels @ barrelsReleased
+    // Remove dead bullets and enemies
+    let bullets = bullets |> List.filterOut deadBullets.Contains
+    let enemies = enemies |> List.filterOut deadEnemies.Contains
     // If enemies escaped, remove enemy (along with its barrel)
     let enemies = enemies |> List.filter (fun e -> not (enemyEscaped e))
     
@@ -451,11 +477,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     allActors gameData |> List.iter (fun actor -> drawActor canvas actor)
 
 let main() = 
-    let player = 
-        { defaultActor with pos = (120., 40.)
-                            angle = degToRad 120.
-                            visual = GameVisual.makeTank() }
-    
+    let player = makePlayer()
     let barrel = { defaultActor with visual = GameVisual.makeBarrel() }
     let barrelPositions = Shape.circle barrelStartCount |> Shape.scaleUni barrelStartPosRadius
     
