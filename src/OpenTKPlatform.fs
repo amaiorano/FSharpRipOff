@@ -27,11 +27,25 @@ type Canvas() =
     member this.restore() = GL.PopMatrix()
     member this.translate (x : float, y : float) = GL.Translate(x, y, 0.)
     member this.rotate angle = GL.Rotate(radToDeg angle, Vector3d.UnitZ)
-    member this.drawVertices (verts : (float * float) list) = 
+    member this.color (r:float) g b = GL.Color3(r, g, b)
+    member this.drawVertices (verts : (float * float) list) =
         GL.Begin(BeginMode.LineLoop)
-        GL.Color3(1.f, 1.f, 1.f)
         verts |> Seq.iter GL.Vertex2
         GL.End()
+
+type DebugDraw() =
+    let mutable lines = [] // list of lists of float * float
+    member this.line (pos1:float*float) (pos2:float*float) =
+        lines <- [pos1; pos2] :: lines
+        
+    member this.draw (canvas:Canvas) =
+        canvas.color 1. 0. 0.
+        lines |> List.iter canvas.drawVertices
+
+    member this.clear() =
+        lines <- []
+
+let debugDraw = DebugDraw ()
 
 type GameWindow(title, viewportSize) = 
     inherit OpenTK.GameWindow()
@@ -59,6 +73,7 @@ type GameWindow(title, viewportSize) =
         GL.MatrixMode(MatrixMode.Modelview)
         GL.LoadIdentity()
         onUpdate e.Time canvas
+        debugDraw.draw canvas
         base.SwapBuffers()
     
     override this.OnResize e = 
