@@ -80,7 +80,8 @@ let screenSize = 800., 600.
 let screenRect = (-fst (screenSize) / 2., -snd (screenSize) / 2., fst (screenSize) / 2., snd (screenSize) / 2.)
 
 type Visual = 
-    { vertices : Vec2List list }
+    { // List of vertex lists, each of which will be drawn as a line loop
+      vertLists : Vec2List list }
 
 type Actor = 
     { pos : Vec2.T
@@ -92,7 +93,7 @@ let defaultActor =
     { pos = (0., 0.)
       angle = 0.
       speed = 0.
-      visual = { vertices = [ [] ] } }
+      visual = { vertLists = [ [] ] } }
 
 type Player = Actor
 
@@ -128,7 +129,7 @@ let defaultDestruction =
       hitPos = Vec2.zero
       elapsedTime = 0. }
 
-let drawVisual (canvas : Canvas) (vis : Visual) = vis.vertices |> List.iter canvas.drawVertices
+let drawVisual (canvas : Canvas) (vis : Visual) = vis.vertLists |> List.iter canvas.drawVertices
 
 let drawActor (canvas : Canvas) (actor : Actor) = 
     canvas.save()
@@ -212,7 +213,7 @@ module GameVisual =
         let wheels = buildWheels 6. 5
         let wheel1 = wheels |> translate (0., -13.)
         let wheel2 = wheels |> translate (0., 13.)
-        { vertices = [ body; wheel1; wheel2; turret ] }
+        { vertLists = [ body; wheel1; wheel2; turret ] }
     
     let makeEnemy() = 
         let body = square |> scale (25., 16.)
@@ -225,10 +226,10 @@ module GameVisual =
         
         let turret1 = turret |> translate (0., -5.)
         let turret2 = turret |> translate (0., 5.)
-        { vertices = [ body; body2; turret1; turret2 ] }
+        { vertLists = [ body; body2; turret1; turret2 ] }
     
-    let makeBarrel() = { vertices = [ circle 6 |> scaleUni 10. ] }
-    let makeBullet() = { vertices = [ square |> scale (4., 2.) ] }
+    let makeBarrel() = { vertLists = [ circle 6 |> scaleUni 10. ] }
+    let makeBullet() = { vertLists = [ square |> scale (4., 2.) ] }
 
 let defaultBullet : Bullet = { defaultActor with visual = GameVisual.makeBullet() }
 
@@ -425,7 +426,7 @@ let choosePermute2 predicate list1 list2 =
 
 let convertToDestruction (hitPos : Vec2.T) (actor : Actor) = 
     // create single list of lines
-    let vertLists = actor.visual.vertices
+    let vertLists = actor.visual.vertLists
     
     // Break apart each vert list into list of lines
     //@TODO: move to a Visual module function
@@ -437,7 +438,7 @@ let convertToDestruction (hitPos : Vec2.T) (actor : Actor) =
                |> List.map (fun (x, y) -> [ x; y ]))
         |> removeOuterList
     { defaultDestruction with hitPos = hitPos
-                              actor = { actor with visual = { vertices = vertLists } } }
+                              actor = { actor with visual = { vertLists = vertLists } } }
 
 let updateDestructions dt (destructions : Destruction list) = 
     let updateDestruction (d : Destruction) : Destruction = 
@@ -449,13 +450,13 @@ let updateDestructions dt (destructions : Destruction list) =
         
         ///debugDraw.line d.actor.pos (toActorWorldSpace d.actor hitPosLS)
         let vertLists = 
-            d.actor.visual.vertices |> List.map (fun verts -> 
-                                           let midpoint = (Shape.midpoint verts)
-                                           let moveDir = Vec2.sub (Shape.midpoint verts) hitPosLS |> Vec2.normalize
-                                           let offset = Vec2.mul (destructionMoveSpeed * dt) moveDir
-                                           Shape.translate offset verts)
+            d.actor.visual.vertLists |> List.map (fun verts -> 
+                                            let midpoint = (Shape.midpoint verts)
+                                            let moveDir = Vec2.sub (Shape.midpoint verts) hitPosLS |> Vec2.normalize
+                                            let offset = Vec2.mul (destructionMoveSpeed * dt) moveDir
+                                            Shape.translate offset verts)
         
-        { d with actor = { d.actor with visual = { d.actor.visual with vertices = vertLists } } } //@TODO: better way?
+        { d with actor = { d.actor with visual = { d.actor.visual with vertLists = vertLists } } } //@TODO: better way?
     destructions
     |> List.map updateDestruction
     |> List.map (fun d -> { d with elapsedTime = d.elapsedTime + dt })
