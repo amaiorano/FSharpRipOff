@@ -433,7 +433,7 @@ let convertToDestruction (hitPos : Vec2.T) (actor : Actor) =
     let vertLists = 
         vertLists
         |> List.map (fun verts -> 
-               verts
+               verts @ [verts.[0]] //@TODO: inefficient!
                |> List.pairwise
                |> List.map (fun (x, y) -> [ x; y ]))
         |> removeOuterList
