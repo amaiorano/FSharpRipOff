@@ -8,6 +8,10 @@ module List =
                     |> predicate
                     |> not)
 
+let removeOuterList (list : 'a list list) = 
+    [ for x in list do
+          yield! x ]
+
 let swapArgs f a b = f b a
 let castTuple t (a, b) = (t a, t b)
 let min (x : float) (y : float) = Math.Min(x, y)
@@ -20,6 +24,7 @@ let clamp minV maxV v =
 
 let cos = Math.Cos
 let sin = Math.Sin
+let atan2 = Math.Atan2
 let cossin rads = (cos (rads), sin (rads))
 let twoPI = 2. * Math.PI
 let normalizeAngle2PI rads = Math.IEEERemainder(rads, twoPI)
@@ -32,17 +37,23 @@ let normalizeAnglePI rads =
 module Vec2 = 
     type T = float * float
     
+    let zero = (0., 0.)
     let add (x1, y1) (x2, y2) = (x1 + x2, y1 + y2)
     let sub (x1, y1) (x2, y2) = (x1 - x2, y1 - y2)
     let mul s (x, y) = (x * s, y * s)
     let addMul (x, y) (dx, dy) s = (x + dx * s, y + dy * s)
-    let fromAngle rads = cossin (rads)
     let magnitude (x, y) = Math.Sqrt(x * x + y * y)
     
     let normalize (x, y) = 
         let mag = magnitude (x, y)
         assert (mag <> 0.)
         (x / mag, y / mag)
+    
+    let fromAngle rads = cossin (rads)
+    
+    let toAngle (x, y) = 
+        let (x, y) = normalize (x, y)
+        atan2 (y, x)
     
     let dot (x1, y1) (x2, y2) = x1 * x2 + y1 * y2
     let cross (x1, y1) (x2, y2) = x1 * y2 - y1 * x2
@@ -53,6 +64,16 @@ module Vec2 =
     let signedAngleDiff v1 v2 = Math.Atan2(cross v1 v2, dot v1 v2)
 
 type Vec2List = Vec2.T list
+
+// OpenTK math types
+//@TODO: should we depend on these? If so, add Vector3 and Matrix4 to OpenTKPlatform to get rid of the namespace
+let toVector3 pos = OpenTK.Vector3(float32 (fst pos), float32 (snd pos), 0.f)
+let fromVector3 (vec3 : OpenTK.Vector3) = (float vec3.X, float vec3.Y)
+
+let toMatrix4 pos angle = 
+    let mt = OpenTK.Matrix4.CreateTranslation(toVector3 pos)
+    let mr = OpenTK.Matrix4.CreateRotationZ(float32 angle)
+    mr * mt
 
 // Game-specific
 let screenSize = 800., 600.
@@ -97,14 +118,37 @@ let defaultEnemy =
       state = Idle
       barrel = None }
 
+type Destruction = 
+    { actor : Actor
+      hitPos : Vec2.T
+      elapsedTime : float }
+
+let defaultDestruction = 
+    { actor = defaultActor
+      hitPos = Vec2.zero
+      elapsedTime = 0. }
+
 let drawVisual (canvas : Canvas) (vis : Visual) = vis.vertices |> List.iter canvas.drawVertices
 
 let drawActor (canvas : Canvas) (actor : Actor) = 
     canvas.save()
     canvas.translate actor.pos
     canvas.rotate (actor.angle)
+    canvas.color 1. 1. 1.
     drawVisual canvas actor.visual
     canvas.restore()
+
+// Transform world space v into local space of actor
+let toActorLocalSpace (actor : Actor) (v : Vec2.T) = 
+    let m = toMatrix4 actor.pos actor.angle
+    m.Invert()
+    let vf = OpenTK.Vector3.Transform(toVector3 v, m)
+    fromVector3 vf
+
+let toActorWorldSpace (actor : Actor) (v : Vec2.T) = 
+    let m = toMatrix4 actor.pos actor.angle
+    let vf = OpenTK.Vector3.Transform(toVector3 v, m)
+    fromVector3 vf
 
 module Shape = 
     let scale (x, y) verts = verts |> List.map (fun (x', y') -> (x' * x, y' * y))
@@ -118,7 +162,9 @@ module Shape =
             match v with
             | [] -> (minX, minY, maxX, maxY)
             | (hx, hy) :: tail -> f tail (min hx minX, min hy minY, max hx maxX, max hy maxY)
-        f v (0., 0., 0., 0.)
+        
+        let (minX, minY), (maxX, maxY) = v.[0], v.[1]
+        f v (minX, minY, maxX, maxY)
     
     // returns center point of input extents (as Vec2)
     let midpoint (v : Vec2List) = 
@@ -191,13 +237,15 @@ type GameData =
       enemies : Enemy list
       barrels : Barrel list
       bullets : Bullet list
-      bulletFireTimeOut : float }
+      bulletFireTimeOut : float
+      destructions : Destruction list }
 
 let allActors gameData = 
     [ gameData.player ] 
     @ gameData.barrels 
       @ (gameData.enemies |> List.map (fun e -> e.actor)) 
-        @ (gameData.enemies |> List.choose (fun e -> e.barrel)) @ gameData.bullets
+        @ (gameData.enemies |> List.choose (fun e -> e.barrel)) 
+          @ gameData.bullets @ (gameData.destructions |> List.map (fun d -> d.actor))
 
 type SpeedConstants = 
     { speedUpRate : float
@@ -254,6 +302,8 @@ let bulletSpeed = 400.
 let bullFireInterval = 0.2
 let barrelStartCount = 6
 let barrelStartPosRadius = 50.
+let destructionTime = 3.
+let destructionMoveSpeed = 120.
 
 let integrate speed angle dt pos = 
     let moveDelta = speed * dt
@@ -338,7 +388,7 @@ let updateEnemy (dt : float) (player : Player) (enemy : Enemy) =
     enemy
 
 let makeEnemyWave() = 
-    let numEnemies = 2
+    let numEnemies = 5
     let enemy = { defaultEnemy with actor = { defaultActor with visual = GameVisual.makeEnemy() } }
     // Spawn at points around the screen rect
     let offset = 30.
@@ -373,13 +423,52 @@ let choosePermute2 predicate list1 list2 =
     let tuples = Seq.init (len1 * len2) (fun i -> list1.[i / len2], list2.[i % len2])
     tuples |> Seq.filter predicate
 
+let convertToDestruction (hitPos : Vec2.T) (actor : Actor) = 
+    // create single list of lines
+    let vertLists = actor.visual.vertices
+    
+    // Break apart each vert list into list of lines
+    //@TODO: move to a Visual module function
+    let vertLists = 
+        vertLists
+        |> List.map (fun verts -> 
+               verts
+               |> List.pairwise
+               |> List.map (fun (x, y) -> [ x; y ]))
+        |> removeOuterList
+    { defaultDestruction with hitPos = hitPos
+                              actor = { actor with visual = { vertices = vertLists } } }
+
+let updateDestructions dt (destructions : Destruction list) = 
+    let updateDestruction (d : Destruction) : Destruction = 
+        let hitPosLS = 
+            d.hitPos
+            |> toActorLocalSpace d.actor
+            |> Vec2.normalize
+            |> Vec2.mul 20.
+        
+        ///debugDraw.line d.actor.pos (toActorWorldSpace d.actor hitPosLS)
+        let vertLists = 
+            d.actor.visual.vertices |> List.map (fun verts -> 
+                                           let midpoint = (Shape.midpoint verts)
+                                           let moveDir = Vec2.sub (Shape.midpoint verts) hitPosLS |> Vec2.normalize
+                                           let offset = Vec2.mul (destructionMoveSpeed * dt) moveDir
+                                           Shape.translate offset verts)
+        
+        { d with actor = { d.actor with visual = { d.actor.visual with vertices = vertLists } } } //@TODO: better way?
+    destructions
+    |> List.map updateDestruction
+    |> List.map (fun d -> { d with elapsedTime = d.elapsedTime + dt })
+    |> List.filter (fun d -> d.elapsedTime < destructionTime)
+
 let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : Canvas) = 
     let player = gameData.player
     let enemies = gameData.enemies
     let barrels = gameData.barrels
     let bullets = gameData.bullets
     let bulletFireTimeOut = gameData.bulletFireTimeOut
-
+    let destructions = gameData.destructions
+    
     // Logic update
     // If all enemies dead, create new wave
     let enemies, barrels = 
@@ -423,8 +512,8 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     
     // Update enemies
     let enemies = enemies |> List.map (updateEnemy dt player)
-    // Check for enemy-bullet collisions
-    let collisionTest (actor, enemy) = Vec2.distance actor.pos enemy.actor.pos < 30.
+    // Check for bullet-enemy collisions
+    let collisionTest (actor, enemy : Enemy) = Vec2.distance actor.pos enemy.actor.pos < 30.
     let collisions = choosePermute2 collisionTest bullets enemies
     
     let deadBullets = 
@@ -464,6 +553,14 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // If enemies escaped, remove enemy (along with its barrel)
     let enemies = enemies |> List.filter (fun e -> not (enemyEscaped e))
     
+    // Add dead enemies to destructions
+    let destructions = 
+        destructions @ (deadEnemies
+                        |> Seq.map (fun e -> convertToDestruction player.pos e.actor)
+                        |> List.ofSeq)
+    
+    let destructions = destructions |> updateDestructions dt
+    
     // To keep it pure, we need to re-register a new instance of update that
     // binds the updated gameData
     let gameData = 
@@ -471,7 +568,8 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
                         enemies = enemies
                         barrels = barrels
                         bullets = bullets
-                        bulletFireTimeOut = bulletFireTimeOut }
+                        bulletFireTimeOut = bulletFireTimeOut
+                        destructions = destructions }
     app.setOnUpdate (update app gameData)
     // Render
     canvas.resetTransform()
@@ -491,7 +589,8 @@ let main() =
           barrels = barrels
           enemies = []
           bullets = []
-          bulletFireTimeOut = 0. }
+          bulletFireTimeOut = 0.
+          destructions = [] }
     
     let app = new Application("FSharpRipOff", screenSize |> castTuple int)
     app.setOnUpdate (update app gameData)
