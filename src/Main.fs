@@ -306,6 +306,13 @@ let barrelStartPosRadius = 50.
 let destructionTime = 3.
 let destructionMoveSpeed = 120.
 
+module GameInput = 
+    let TurnLeft() = Keyboard.IsAnyDown [ Key.Left; Key.A ]
+    let TurnRight() = Keyboard.IsAnyDown [ Key.Right; Key.D ]
+    let Accelerate() = Keyboard.IsAnyDown [ Key.Up; Key.W ]
+    let Break() = Keyboard.IsAnyDown [ Key.Down; Key.S ]
+    let Fire() = Keyboard.IsAnyDown [ Key.Space; Key.J; Key.LControl ]
+
 let integrate speed angle dt pos = 
     let moveDelta = speed * dt
     let forward = Vec2.fromAngle angle
@@ -317,16 +324,16 @@ let movePlayer dt player =
     let actor = player
     
     let turnAction = 
-        if Keyboard.IsDown Key.Left then TurnLeft
-        elif Keyboard.IsDown Key.Right then TurnRight
+        if GameInput.TurnLeft() then TurnLeft
+        elif GameInput.TurnRight() then TurnRight
         else NoTurn
     
     let turnRate = twoPI
     let finalAngle = updateFacingAngle turnRate turnAction dt actor.angle
     
     let speedAction = 
-        if Keyboard.IsDown Key.Up then Accelerate
-        elif Keyboard.IsDown Key.Down then Break
+        if GameInput.Accelerate() then Accelerate
+        elif GameInput.Break() then Break
         else Decelerate
     
     let speedConstants = playerSpeedConstants
@@ -433,7 +440,7 @@ let convertToDestruction (hitPos : Vec2.T) (actor : Actor) =
     let vertLists = 
         vertLists
         |> List.map (fun verts -> 
-               verts @ [verts.[0]] //@TODO: inefficient!
+               verts @ [ verts.[0] ] //@TODO: inefficient!
                |> List.pairwise
                |> List.map (fun (x, y) -> [ x; y ]))
         |> removeOuterList
@@ -492,7 +499,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let player = player |> movePlayer dt
     // Update bullets
     let bulletFireTimeOut = max 0. (bulletFireTimeOut - dt)
-    let fireBullet = bulletFireTimeOut = 0. && Keyboard.IsDown Key.Space
+    let fireBullet = bulletFireTimeOut = 0. && GameInput.Fire()
     
     let newBullet = 
         if fireBullet then 

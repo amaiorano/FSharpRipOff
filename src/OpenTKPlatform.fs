@@ -12,6 +12,7 @@ type Key = OpenTK.Input.Key
 
 module Keyboard = 
     let IsDown(key : Input.Key) = Input.Keyboard.GetState().IsKeyDown(key)
+    let IsAnyDown(keys : Input.Key list) = keys |> List.tryFind IsDown |> Option.isSome
 
 type Canvas() = 
     
