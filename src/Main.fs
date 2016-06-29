@@ -521,32 +521,48 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // Update enemies
     let enemies = enemies |> List.map (updateEnemy dt player)
     // Check for bullet-enemy collisions
-    let collisionTest (actor, enemy : Enemy) = Vec2.distance actor.pos enemy.actor.pos < 30.
-    let collisions = choosePermute2 collisionTest bullets enemies
+    let collisionTest (actor1, actor2) = Vec2.distance actor1.pos actor2.pos < 30.
+    let collisionTestWithEnemy (actor, enemy : Enemy) = collisionTest (actor, enemy.actor)
+    let bulletEnemyCollisions = choosePermute2 collisionTestWithEnemy bullets enemies
     
     let deadBullets = 
-        collisions
+        bulletEnemyCollisions
         |> Seq.map fst
         |> set
     
     let deadEnemies = 
-        collisions
+        bulletEnemyCollisions
         |> Seq.map snd
         |> set
     
+    // Convert colliding enemies and bullets to detructions
+    let destructions = 
+        let enemyDestructions = 
+            bulletEnemyCollisions
+            |> Seq.map (fun (b, e) -> convertToDestruction b.pos e.actor)
+            |> Seq.toList
+        
+        let bulletDestructions = 
+            bulletEnemyCollisions
+            |> Seq.map (fun (b, e) -> convertToDestruction e.actor.pos b)
+            |> Seq.toList
+        
+        destructions @ enemyDestructions @ bulletDestructions
+    
     // Check for player-enemy collisions
-    let enemyCollidingWithPlayer = enemies |> List.tryFind (fun e -> collisionTest (player, e))
+    let enemyCollidingWithPlayer = enemies |> List.tryFind (fun e -> collisionTest (player, e.actor))
     
     // Kill first enemy that collides with player
-    let deadEnemies = 
+    let deadEnemies, destructions = 
         match enemyCollidingWithPlayer with
-        | Some(e) -> deadEnemies.Add(e)
-        | None -> deadEnemies
+        | Some(e) -> deadEnemies.Add(e), convertToDestruction player.pos e.actor :: destructions
+        | None -> deadEnemies, destructions
     
     // Kill player if it collided with enemy
-    let player = 
-        if enemyCollidingWithPlayer.IsSome then makePlayer()
-        else player
+    let nextPlayer, destructions = 
+        match enemyCollidingWithPlayer with
+        | Some(e) -> makePlayer(), convertToDestruction e.actor.pos player :: destructions
+        | None -> player, destructions
     
     // Put barrels of dead enemies back into master list
     let barrelsReleased = 
@@ -560,19 +576,13 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let enemies = enemies |> List.filterOut deadEnemies.Contains
     // If enemies escaped, remove enemy (along with its barrel)
     let enemies = enemies |> List.filter (fun e -> not (enemyEscaped e))
-    
-    // Add dead enemies to destructions
-    let destructions = 
-        destructions @ (deadEnemies
-                        |> Seq.map (fun e -> convertToDestruction player.pos e.actor)
-                        |> List.ofSeq)
-    
+    //  Update destructions
     let destructions = destructions |> updateDestructions dt
     
     // To keep it pure, we need to re-register a new instance of update that
     // binds the updated gameData
     let gameData = 
-        { gameData with player = player
+        { gameData with player = nextPlayer
                         enemies = enemies
                         barrels = barrels
                         bullets = bullets
