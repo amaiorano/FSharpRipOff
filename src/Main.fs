@@ -37,17 +37,18 @@ let normalizeAnglePI rads =
 module Vec2 = 
     type T = float * float
     
-    let zero = (0., 0.)
-    let add (x1, y1) (x2, y2) = (x1 + x2, y1 + y2)
-    let sub (x1, y1) (x2, y2) = (x1 - x2, y1 - y2)
-    let mul s (x, y) = (x * s, y * s)
-    let addMul (x, y) (dx, dy) s = (x + dx * s, y + dy * s)
+    let zero = 0., 0.
+    let add (x1, y1) (x2, y2) = x1 + x2, y1 + y2
+    let sub (x1, y1) (x2, y2) = x1 - x2, y1 - y2
+    let elementWiseMul (x1, y1) (x2, y2) = x1 * x2, y1 * y2
+    let mul s (x, y) = x * s, y * s
+    let addMul (x, y) (dx, dy) s = x + dx * s, y + dy * s
     let magnitude (x, y) = Math.Sqrt(x * x + y * y)
     
     let normalize (x, y) = 
         let mag = magnitude (x, y)
         assert (mag <> 0.)
-        (x / mag, y / mag)
+        x / mag, y / mag
     
     let fromAngle rads = cossin (rads)
     
@@ -75,9 +76,46 @@ let toMatrix4 pos angle =
     let mr = OpenTK.Matrix4.CreateRotationZ(float32 angle)
     mr * mt
 
+let isPointInsideRect point rect = 
+    let x, y = point
+    let x1, y1, x2, y2 = rect
+    x >= x1 && x <= x2 && y >= y1 && y <= y2
+
+// Returns sequence of tuples (x,y) for which predicate returns true for all permutations of list1 and list2
+let choosePermute2 predicate list1 list2 = 
+    let len1 = List.length list1
+    let len2 = List.length list2
+    let tuples = Seq.init (len1 * len2) (fun i -> list1.[i / len2], list2.[i % len2])
+    tuples |> Seq.filter predicate
+
+// Returns intersection of lines ps1,pe1 and ps2,pe2
+let intersection (ps1x, ps1y) (pe1x, pe1y) (ps2x, ps2y) (pe2x, pe2y) = 
+    let A1 = pe1y - ps1y
+    let B1 = ps1x - pe1x
+    let C1 = A1 * ps1x + B1 * ps1y
+    let A2 = pe2y - ps2y
+    let B2 = ps2x - pe2x
+    let C2 = A2 * ps2x + B2 * ps2y
+    let delta = A1 * B2 - A2 * B1
+    //    if delta = 0. then None
+    assert (delta <> 0.)
+    (B2 * C1 - B1 * C2) / delta, (A1 * C2 - A2 * C1) / delta
+
 // Game-specific
 let screenSize = 800., 600.
+// order: left, bottom, right, top
 let screenRect = (-fst (screenSize) / 2., -snd (screenSize) / 2., fst (screenSize) / 2., snd (screenSize) / 2.)
+
+let screenEdges = 
+    let (l, b, r, t) = screenRect
+    [ (l, t)
+      (l, b) ], 
+    [ (l, b)
+      (r, b) ], 
+    [ (r, b)
+      (r, t) ], 
+    [ (r, t)
+      (l, t) ]
 
 type Visual = 
     { // List of vertex lists, each of which will be drawn as a line loop
@@ -402,8 +440,8 @@ let makeEnemyWave() =
     let offset = 30.
     
     let spawnRect = 
-        match screenRect with
-        | (left, bottom, right, top) -> left - offset, bottom - offset, right + offset, top + offset
+        let left, bottom, right, top = screenRect
+        left - offset, bottom - offset, right + offset, top + offset
     
     let positions = 
         Shape.circle numEnemies
@@ -416,20 +454,31 @@ let makeEnemyWave() =
 
 let enemyEscaped enemy = enemy.state = Leave && isNearPosition enemy.actor.pos enemy.spawnPos
 let allEnemiesDead (enemies : Enemy list) = enemies.IsEmpty
+let isActorOnScreen (actor : Actor) = isPointInsideRect actor.pos screenRect
 
-let intersectsPointRect point rect = 
-    let x, y = point
-    let x1, y1, x2, y2 = rect
-    x >= x1 && x <= x2 && y >= y1 && y <= y2
-
-let isActorOnScreen (actor : Actor) = intersectsPointRect actor.pos screenRect
-
-// Returns sequence of tuples (x,y) for which predicate returns true for all permutations of list1 and list2
-let choosePermute2 predicate list1 list2 = 
-    let len1 = List.length list1
-    let len2 = List.length list2
-    let tuples = Seq.init (len1 * len2) (fun i -> list1.[i / len2], list2.[i % len2])
-    tuples |> Seq.filter predicate
+let bounceOffScreenEdge (preMoveActor : Actor) (postMoveActor : Actor) : Actor = 
+    let x1, y1 = preMoveActor.pos
+    let x2, y2 = postMoveActor.pos
+    
+    let computeReflectedPosAndAngle (edge : Vec2List) reflectDir = 
+        let p = intersection (x1, y1) (x2, y2) edge.[0] edge.[1]
+        let p' = Vec2.sub postMoveActor.pos p // intersection point to new pos
+        let delta = Vec2.elementWiseMul p' reflectDir
+        Vec2.add p delta, Vec2.toAngle delta
+    
+    let left, bottom, right, top = screenRect
+    let leftEdge, bottomEdge, rightEdge, topEdge = screenEdges
+    let reflectDirX = (-1., 1.)
+    let reflectDirY = (1., -1.)
+    
+    let pos, angle = 
+        if x2 < left then computeReflectedPosAndAngle leftEdge reflectDirX
+        elif x2 > right then computeReflectedPosAndAngle rightEdge reflectDirX
+        elif y2 > top then computeReflectedPosAndAngle topEdge reflectDirY
+        elif y2 < bottom then computeReflectedPosAndAngle bottomEdge reflectDirY
+        else postMoveActor.pos, postMoveActor.angle
+    { postMoveActor with pos = pos
+                         angle = angle }
 
 let convertToDestruction (hitPos : Vec2.T) (actor : Actor) = 
     // create single list of lines
@@ -496,7 +545,11 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
         else (enemies, barrels)
     
     // Update player
-    let player = player |> movePlayer dt
+    let player = 
+        player
+        |> movePlayer dt
+        |> bounceOffScreenEdge player // 'player' here is the pre-moved copy
+    
     // Update bullets
     let bulletFireTimeOut = max 0. (bulletFireTimeOut - dt)
     let fireBullet = bulletFireTimeOut = 0. && GameInput.Fire()
