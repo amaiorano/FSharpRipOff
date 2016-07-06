@@ -271,13 +271,32 @@ module GameVisual =
 
 let defaultBullet : Bullet = { defaultActor with visual = GameVisual.makeBullet() }
 
+module CameraShake = 
+    type T = 
+        { rand : Random
+          amplitude : float }
+    
+    let defaultCameraShake = 
+        { rand = new Random()
+          amplitude = 0. }
+    
+    let maxAmplitude = 8.
+    let amplitudeIncrement = 3.
+    let amplitudeDecayRate = 8.
+    let update dt camShake = { camShake with amplitude = max 0. (camShake.amplitude - amplitudeDecayRate * dt) }
+    let shake camShake = { camShake with amplitude = min maxAmplitude (camShake.amplitude + amplitudeIncrement) }
+    let shakeN numTimes camShake = { 1..numTimes } |> Seq.fold (fun camShake n -> shake camShake) camShake
+    let getOffset (camShake : T) = 
+        (camShake.rand.NextDouble() * camShake.amplitude, camShake.rand.NextDouble() * camShake.amplitude)
+
 type GameData = 
     { player : Player
       enemies : Enemy list
       barrels : Barrel list
       bullets : Bullet list
       bulletFireTimeOut : float
-      destructions : Destruction list }
+      destructions : Destruction list
+      cameraShake : CameraShake.T }
 
 let allActors gameData = 
     [ gameData.player ] 
@@ -525,6 +544,8 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let bullets = gameData.bullets
     let bulletFireTimeOut = gameData.bulletFireTimeOut
     let destructions = gameData.destructions
+    let cameraShake = gameData.cameraShake
+    let lastDestructions = destructions
     
     // Logic update
     // If all enemies dead, create new wave
@@ -630,7 +651,12 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // If enemies escaped, remove enemy (along with its barrel)
     let enemies = enemies |> List.filter (fun e -> not (enemyEscaped e))
     //  Update destructions
+    let numNewDestructions = destructions.Length - lastDestructions.Length
     let destructions = destructions |> updateDestructions dt
+    // Update camera shake
+    let cameraShake = CameraShake.shakeN numNewDestructions cameraShake
+    let camShakeOffset = CameraShake.getOffset cameraShake
+    let cameraShake = CameraShake.update dt cameraShake
     
     // To keep it pure, we need to re-register a new instance of update that
     // binds the updated gameData
@@ -640,11 +666,13 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
                         barrels = barrels
                         bullets = bullets
                         bulletFireTimeOut = bulletFireTimeOut
-                        destructions = destructions }
+                        destructions = destructions
+                        cameraShake = cameraShake }
     app.setOnUpdate (update app gameData)
     // Render
     canvas.resetTransform()
     canvas.clear()
+    canvas.translate camShakeOffset
     allActors gameData |> List.iter (fun actor -> drawActor canvas actor)
 
 let main() = 
@@ -661,7 +689,8 @@ let main() =
           enemies = []
           bullets = []
           bulletFireTimeOut = 0.
-          destructions = [] }
+          destructions = []
+          cameraShake = CameraShake.defaultCameraShake }
     
     let app = new Application("FSharpRipOff", screenSize |> castTuple int)
     app.setOnUpdate (update app gameData)
