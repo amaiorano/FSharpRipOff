@@ -382,8 +382,8 @@ let bulletSpeed = 400.
 let bullFireInterval = 0.2
 let barrelStartCount = 6
 let barrelStartPosRadius = 50.
-let destructionTime = 3.
-let destructionMoveSpeed = 120.
+let destructionTime = 2.
+let destructionMoveSpeed = 200.
 
 module GameInput = 
     let TurnLeft() = Keyboard.IsAnyDown [ Key.Left; Key.A ]
@@ -545,12 +545,15 @@ let updateDestructions dt (destructions : Destruction list) =
             |> Vec2.normalize
             |> Vec2.mul 20.
         
-        ///debugDraw.line d.actor.pos (toActorWorldSpace d.actor hitPosLS)
         let vertLists = 
             d.actor.visual.vertLists |> List.map (fun verts -> 
                                             let midpoint = (Shape.midpoint verts)
                                             let moveDir = Vec2.sub (Shape.midpoint verts) hitPosLS |> Vec2.normalize
-                                            let offset = Vec2.mul (destructionMoveSpeed * dt) moveDir
+                                            // Move pieces slower as they approach their destruction time - but get there a little faster
+                                            // so they can remain on the ground for a while before disappearing
+                                            let ratio = 
+                                                max 0. ((destructionTime - d.elapsedTime * 2.) / destructionTime)
+                                            let offset = Vec2.mul (ratio * destructionMoveSpeed * dt) moveDir
                                             Shape.translate offset verts)
         
         { d with actor = { d.actor with visual = { d.actor.visual with vertLists = vertLists } } } //@TODO: better way?
