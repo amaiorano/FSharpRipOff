@@ -101,6 +101,25 @@ let intersection (ps1x, ps1y) (pe1x, pe1y) (ps2x, ps2y) (pe2x, pe2y) =
     assert (delta <> 0.)
     (B2 * C1 - B1 * C2) / delta, (A1 * C2 - A2 * C1) / delta
 
+type Approach = 
+    // Approaches current towards target using a viscous damped approach; by default, it will reach
+    // 99% (factor) of target within 1 (timeToTarget) second, then will keep getting closer but never
+    // reach the (asymptotic) target. The tolerance can be set to make sure the target is reached, but
+    // keep in mind that this modifies the shape of the curve (slightly).
+    static member damped (current, target, dt, ?factor, ?timeToTarget, ?tolerance) = 
+        let factor = defaultArg factor 0.99
+        let timeToTarget = defaultArg timeToTarget 1.
+        let tolerance = defaultArg tolerance 0.
+        if current = target || timeToTarget = 0. then target
+        else 
+            let delta = target - current
+            let deltaSign = float (Math.Sign(float32 delta))
+            let newTarget = target + deltaSign * tolerance
+            let alpha = 1. - Math.Pow(1. - factor, dt / timeToTarget)
+            let step = (newTarget - current) * alpha
+            if (step * deltaSign) > (delta * deltaSign) then target
+            else current + step
+
 // Game-specific
 let screenSize = 800., 600.
 // order: left, bottom, right, top
@@ -280,12 +299,15 @@ module CameraShake =
         { rand = new Random()
           amplitude = 0. }
     
-    let maxAmplitude = 8.
+    let maxAmplitude = 10.
     let amplitudeIncrement = 3.
-    let amplitudeDecayRate = 8.
-    let update dt camShake = { camShake with amplitude = max 0. (camShake.amplitude - amplitudeDecayRate * dt) }
+    let amplitudeDecayTime = 1.2
     let shake camShake = { camShake with amplitude = min maxAmplitude (camShake.amplitude + amplitudeIncrement) }
     let shakeN numTimes camShake = { 1..numTimes } |> Seq.fold (fun camShake n -> shake camShake) camShake
+    let update dt camShake = 
+        { camShake with amplitude = 
+                            Approach.damped 
+                                (camShake.amplitude, 0., dt, timeToTarget = amplitudeDecayTime, tolerance = 0.05) }
     let getOffset (camShake : T) = 
         (camShake.rand.NextDouble() * camShake.amplitude, camShake.rand.NextDouble() * camShake.amplitude)
 
@@ -655,7 +677,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let destructions = destructions |> updateDestructions dt
     // Update camera shake
     let cameraShake = CameraShake.shakeN numNewDestructions cameraShake
-    let camShakeOffset = CameraShake.getOffset cameraShake
+    let cameraShakeOffset = CameraShake.getOffset cameraShake
     let cameraShake = CameraShake.update dt cameraShake
     
     // To keep it pure, we need to re-register a new instance of update that
@@ -672,7 +694,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // Render
     canvas.resetTransform()
     canvas.clear()
-    canvas.translate camShakeOffset
+    canvas.translate cameraShakeOffset
     allActors gameData |> List.iter (fun actor -> drawActor canvas actor)
 
 let main() = 
