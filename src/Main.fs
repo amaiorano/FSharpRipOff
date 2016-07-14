@@ -312,7 +312,7 @@ module CameraShake =
         (camShake.rand.NextDouble() * camShake.amplitude, camShake.rand.NextDouble() * camShake.amplitude)
 
 type GameData = 
-    { player : Player
+    { players : Player list
       enemies : Enemy list
       barrels : Barrel list
       bullets : Bullet list
@@ -321,7 +321,7 @@ type GameData =
       cameraShake : CameraShake.T }
 
 let allActors gameData = 
-    [ gameData.player ] 
+    gameData.players 
     @ gameData.barrels 
       @ (gameData.enemies |> List.map (fun e -> e.actor)) 
         @ (gameData.enemies |> List.choose (fun e -> e.barrel)) 
@@ -456,13 +456,15 @@ let moveEnemy (targetPos : Vec2.T) dt (enemy : Enemy) =
                                         angle = finalAngle
                                         speed = finalSpeed } }
 
-let updateEnemy (dt : float) (player : Player) (enemy : Enemy) = 
+let updateEnemy (dt : float) (players : Player list) (enemy : Enemy) = 
     let enemy = 
         match enemy.state with
         | Idle -> 
             match enemy.barrel with
             | Some(barrel) -> { enemy with state = GrabBarrel }
-            | None -> { enemy with state = AttackPlayer }
+            | None -> 
+                if players.IsEmpty then enemy //@TODO: circle around the map until player spawns?
+                else { enemy with state = AttackPlayer }
         | GrabBarrel -> 
             let barrel = enemy.barrel.Value
             if isNearPosition (enemy.actor.pos) (barrel.pos) then { enemy with state = Leave }
@@ -471,7 +473,7 @@ let updateEnemy (dt : float) (player : Player) (enemy : Enemy) =
             let e = moveEnemy enemy.spawnPos dt enemy
             let barrel = { e.barrel.Value with pos = e.actor.pos }
             { e with barrel = Some(barrel) }
-        | AttackPlayer -> moveEnemy (player.pos) dt enemy
+        | AttackPlayer -> moveEnemy (players.[0].pos) dt enemy //@TODO: per player
     enemy
 
 let makeEnemyWave() = 
@@ -563,7 +565,7 @@ let updateDestructions dt (destructions : Destruction list) =
     |> List.filter (fun d -> d.elapsedTime < destructionTime)
 
 let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : Canvas) = 
-    let player = gameData.player
+    let players = gameData.players
     let enemies = gameData.enemies
     let barrels = gameData.barrels
     let bullets = gameData.bullets
@@ -573,6 +575,11 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let lastDestructions = destructions
     
     // Logic update
+    //@TODO: Respawn dead players after some time
+    let players = 
+        if players.IsEmpty then [ makePlayer() ]
+        else players
+    
     // If all enemies dead, create new wave
     let enemies, barrels = 
         if allEnemiesDead enemies then 
@@ -590,27 +597,29 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
             (enemies, barrels)
         else (enemies, barrels)
     
-    // Update player
-    let player = 
-        player
-        |> movePlayer dt
-        |> bounceOffScreenEdge player // 'player' here is the pre-moved copy
+    // Update players
+    let players = 
+        players |> List.map (fun p -> 
+                       p
+                       |> movePlayer dt
+                       |> bounceOffScreenEdge p) // 'p' here is the pre-moved copy
     
-    // Update bullets
+    // Update bullets - @TODO: per player
     let bulletFireTimeOut = max 0. (bulletFireTimeOut - dt)
     let fireBullet = bulletFireTimeOut = 0. && GameInput.Fire()
     
-    let newBullet = 
-        if fireBullet then 
-            Some { defaultBullet with pos = player.pos
-                                      angle = player.angle }
-        else None
+    let bullets = 
+        players |> List.fold (fun bullets p -> 
+                       if fireBullet then 
+                           { defaultBullet with pos = p.pos
+                                                angle = p.angle }
+                           :: bullets
+                       else bullets) bullets
     
+    //@TODO: per player
     let bulletFireTimeOut = 
         if fireBullet then bullFireInterval
         else bulletFireTimeOut
-    
-    let bullets = bullets @ Option.toList newBullet
     
     let bullets = 
         bullets
@@ -618,61 +627,51 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
         |> List.filter isActorOnScreen
     
     // Update enemies
-    let enemies = enemies |> List.map (updateEnemy dt player)
-    // Check for bullet-enemy collisions
+    let enemies = enemies |> List.map (updateEnemy dt players)
+    // Handle collisions
+    let addTupleToSets (set1 : Set<'a>, set2 : Set<'b>) (x, y) = set1.Add(x), set2.Add(y)
+    
+    let toActor (x : obj) = 
+        match x with
+        | :? Enemy as e -> e.actor
+        | :? Actor as a -> a
+        | _ -> 
+            assert false
+            defaultActor // @TODO: what should we do here?
+    
+    let collisionPairToDestruction (x, y) = convertToDestruction (toActor x).pos (toActor y)
     let collisionTest (actor1, actor2) = Vec2.distance actor1.pos actor2.pos < 30.
     let collisionTestWithEnemy (actor, enemy : Enemy) = collisionTest (actor, enemy.actor)
+    
+    let collisionsToDestructions destructions collisions = 
+        collisions
+        |> Seq.toList
+        |> List.fold 
+               (fun destructions (x, y) -> 
+               collisionPairToDestruction (x, y) :: collisionPairToDestruction (y, x) :: destructions) destructions
+    
+    let deadBullets = Set<Bullet>([])
+    let deadEnemies = Set<Enemy>([])
+    let deadPlayers = Set<Player>([])
+    // Bullet-enemy collisions
     let bulletEnemyCollisions = choosePermute2 collisionTestWithEnemy bullets enemies
-    
-    let deadBullets = 
-        bulletEnemyCollisions
-        |> Seq.map fst
-        |> set
-    
-    let deadEnemies = 
-        bulletEnemyCollisions
-        |> Seq.map snd
-        |> set
-    
-    // Convert colliding enemies and bullets to detructions
-    let destructions = 
-        let enemyDestructions = 
-            bulletEnemyCollisions
-            |> Seq.map (fun (b, e) -> convertToDestruction b.pos e.actor)
-            |> Seq.toList
-        
-        let bulletDestructions = 
-            bulletEnemyCollisions
-            |> Seq.map (fun (b, e) -> convertToDestruction e.actor.pos b)
-            |> Seq.toList
-        
-        destructions @ enemyDestructions @ bulletDestructions
-    
-    // Check for player-enemy collisions
-    let enemyCollidingWithPlayer = enemies |> List.tryFind (fun e -> collisionTest (player, e.actor))
-    
-    // Kill first enemy that collides with player
-    let deadEnemies, destructions = 
-        match enemyCollidingWithPlayer with
-        | Some(e) -> deadEnemies.Add(e), convertToDestruction player.pos e.actor :: destructions
-        | None -> deadEnemies, destructions
-    
-    // Kill player if it collided with enemy
-    let nextPlayer, destructions = 
-        match enemyCollidingWithPlayer with
-        | Some(e) -> makePlayer(), convertToDestruction e.actor.pos player :: destructions
-        | None -> player, destructions
+    let deadBullets, deadEnemies = bulletEnemyCollisions |> Seq.fold addTupleToSets (deadBullets, deadEnemies)
+    let destructions = collisionsToDestructions destructions bulletEnemyCollisions
+    // Player-enemy collisions    
+    let playerEnemyCollisions = choosePermute2 collisionTestWithEnemy players enemies
+    let deadPlayers, deadEnemies = playerEnemyCollisions |> Seq.fold addTupleToSets (deadPlayers, deadEnemies)
+    let destructions = collisionsToDestructions destructions playerEnemyCollisions
+    // Remove dead actors
+    let players = players |> List.filterOut deadPlayers.Contains
+    let enemies = enemies |> List.filterOut deadEnemies.Contains
+    let bullets = bullets |> List.filterOut deadBullets.Contains
     
     // Put barrels of dead enemies back into master list
-    let barrelsReleased = 
+    let barrels = 
         deadEnemies
         |> Seq.choose (fun e -> e.barrel)
-        |> List.ofSeq
+        |> Seq.fold (fun barrels b -> b :: barrels) barrels
     
-    let barrels = barrels @ barrelsReleased
-    // Remove dead bullets and enemies
-    let bullets = bullets |> List.filterOut deadBullets.Contains
-    let enemies = enemies |> List.filterOut deadEnemies.Contains
     // If enemies escaped, remove enemy (along with its barrel)
     let enemies = enemies |> List.filter (fun e -> not (enemyEscaped e))
     //  Update destructions
@@ -686,7 +685,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // To keep it pure, we need to re-register a new instance of update that
     // binds the updated gameData
     let gameData = 
-        { gameData with player = nextPlayer
+        { gameData with players = players
                         enemies = enemies
                         barrels = barrels
                         bullets = bullets
@@ -701,7 +700,6 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     allActors gameData |> List.iter (fun actor -> drawActor canvas actor)
 
 let main() = 
-    let player = makePlayer()
     let barrel = { defaultActor with visual = GameVisual.makeBarrel() }
     let barrelPositions = Shape.circle barrelStartCount |> Shape.scaleUni barrelStartPosRadius
     
@@ -709,7 +707,7 @@ let main() =
         [ for i in 1..barrelPositions.Length -> { barrel with pos = barrelPositions.[i - 1] } ]
     
     let gameData = 
-        { player = player
+        { players = []
           barrels = barrels
           enemies = []
           bullets = []
