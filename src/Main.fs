@@ -313,6 +313,7 @@ module CameraShake =
 
 type GameData = 
     { players : Player list
+      playerSpawnTimeOut : float
       enemies : Enemy list
       barrels : Barrel list
       bullets : Bullet list
@@ -378,6 +379,7 @@ let enemySpeedConstants =
       autoSpeedDownRate = -300.
       maxSpeed = 150. }
 
+let playerSpawnInterval = 1.5
 let bulletSpeed = 400.
 let bullFireInterval = 0.2
 let barrelStartCount = 6
@@ -463,7 +465,12 @@ let updateEnemy (dt : float) (players : Player list) (enemy : Enemy) =
             match enemy.barrel with
             | Some(barrel) -> { enemy with state = GrabBarrel }
             | None -> 
-                if players.IsEmpty then enemy //@TODO: circle around the map until player spawns?
+                if players.IsEmpty then 
+                    // circle around until player spawns
+                    let turnRate = 10. * Math.PI
+                    let angle = enemy.actor.angle + turnRate * dt
+                    let pointAhead = Vec2.add enemy.actor.pos (Vec2.mul 100. (Vec2.fromAngle angle))
+                    moveEnemy pointAhead dt enemy
                 else { enemy with state = AttackPlayer }
         | GrabBarrel -> 
             let barrel = enemy.barrel.Value
@@ -473,7 +480,9 @@ let updateEnemy (dt : float) (players : Player list) (enemy : Enemy) =
             let e = moveEnemy enemy.spawnPos dt enemy
             let barrel = { e.barrel.Value with pos = e.actor.pos }
             { e with barrel = Some(barrel) }
-        | AttackPlayer -> moveEnemy (players.[0].pos) dt enemy //@TODO: per player
+        | AttackPlayer -> 
+            if players.IsEmpty then { enemy with state = Idle }
+            else moveEnemy (players.[0].pos) dt enemy //@TODO: per player
     enemy
 
 let makeEnemyWave() = 
@@ -566,6 +575,7 @@ let updateDestructions dt (destructions : Destruction list) =
 
 let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : Canvas) = 
     let players = gameData.players
+    let playerSpawnTimeOut = gameData.playerSpawnTimeOut
     let enemies = gameData.enemies
     let barrels = gameData.barrels
     let bullets = gameData.bullets
@@ -576,9 +586,13 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     
     // Logic update
     //@TODO: Respawn dead players after some time
-    let players = 
-        if players.IsEmpty then [ makePlayer() ]
-        else players
+    let players, playerSpawnTimeOut = 
+        if players.IsEmpty then 
+            let playerSpawnTimeOut = max 0. (playerSpawnTimeOut - dt)
+            match playerSpawnTimeOut with
+            | 0. -> [ makePlayer() ], playerSpawnInterval
+            | _ -> players, playerSpawnTimeOut
+        else players, playerSpawnTimeOut
     
     // If all enemies dead, create new wave
     let enemies, barrels = 
@@ -686,6 +700,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // binds the updated gameData
     let gameData = 
         { gameData with players = players
+                        playerSpawnTimeOut = playerSpawnTimeOut
                         enemies = enemies
                         barrels = barrels
                         bullets = bullets
@@ -708,6 +723,7 @@ let main() =
     
     let gameData = 
         { players = []
+          playerSpawnTimeOut = 0.
           barrels = barrels
           enemies = []
           bullets = []
