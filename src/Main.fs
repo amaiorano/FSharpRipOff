@@ -1,12 +1,9 @@
 ﻿open OpenTKPlatform
 open System
 
-module List = 
-    let filterOut predicate list = 
-        list |> List.filter (fun x -> 
-                    x
-                    |> predicate
-                    |> not)
+//@TODO: add these to Seq module?
+let filterOut predicate seq = seq |> Seq.filter (fun x -> not (predicate x))
+let appendSingleton sequence x = Seq.singleton x |> Seq.append sequence
 
 let removeOuterList (list : 'a list list) = 
     [ for x in list do
@@ -81,12 +78,12 @@ let isPointInsideRect point rect =
     let x1, y1, x2, y2 = rect
     x >= x1 && x <= x2 && y >= y1 && y <= y2
 
-// Returns sequence of tuples (x,y) for which predicate returns true for all permutations of list1 and list2
-let choosePermute2 predicate list1 list2 = 
-    let len1 = List.length list1
-    let len2 = List.length list2
-    let tuples = Seq.init (len1 * len2) (fun i -> list1.[i / len2], list2.[i % len2])
-    tuples |> Seq.filter predicate
+// Returns sequence of tuples (x,y) for which predicate returns true for all permutations of seq1 and seq2
+let choosePermute2 predicate seq1 seq2 = 
+    (Seq.empty, seq1) ||> Seq.fold (fun tuples e1 -> 
+                              (tuples, seq2) ||> Seq.fold (fun tuples e2 -> 
+                                                     if predicate (e1, e2) then appendSingleton tuples (e1, e2)
+                                                     else tuples))
 
 // Returns intersection of lines ps1,pe1 and ps2,pe2
 let intersection (ps1x, ps1y) (pe1x, pe1y) (ps2x, ps2y) (pe2x, pe2y) = 
@@ -458,14 +455,14 @@ let moveEnemy (targetPos : Vec2.T) dt (enemy : Enemy) =
                                         angle = finalAngle
                                         speed = finalSpeed } }
 
-let updateEnemy (dt : float) (players : Player list) (enemy : Enemy) = 
+let updateEnemy (dt : float) (players : Player seq) (enemy : Enemy) = 
     let enemy = 
         match enemy.state with
         | Idle -> 
             match enemy.barrel with
             | Some(barrel) -> { enemy with state = GrabBarrel }
             | None -> 
-                if players.IsEmpty then 
+                if Seq.isEmpty players then 
                     // circle around until player spawns
                     let turnRate = 10. * Math.PI
                     let angle = enemy.actor.angle + turnRate * dt
@@ -481,8 +478,8 @@ let updateEnemy (dt : float) (players : Player list) (enemy : Enemy) =
             let barrel = { e.barrel.Value with pos = e.actor.pos }
             { e with barrel = Some(barrel) }
         | AttackPlayer -> 
-            if players.IsEmpty then { enemy with state = Idle }
-            else moveEnemy (players.[0].pos) dt enemy //@TODO: per player
+            if Seq.isEmpty players then { enemy with state = Idle }
+            else moveEnemy ((Seq.head players).pos) dt enemy //@TODO: per player
     enemy
 
 let makeEnemyWave() = 
@@ -500,12 +497,14 @@ let makeEnemyWave() =
         |> Shape.scaleUni 1000.
         |> Shape.shrinkToRect spawnRect
     
-    [ for i in 0..positions.Length - 1 -> 
-          { enemy with spawnPos = positions.[i]
-                       actor = { enemy.actor with pos = positions.[i] } } ]
+    seq { 
+        for i in 0..positions.Length - 1 -> 
+            { enemy with spawnPos = positions.[i]
+                         actor = { enemy.actor with pos = positions.[i] } }
+    }
 
 let enemyEscaped enemy = enemy.state = Leave && isNearPosition enemy.actor.pos enemy.spawnPos
-let allEnemiesDead (enemies : Enemy list) = enemies.IsEmpty
+let allEnemiesDead enemies = Seq.isEmpty enemies
 let isActorOnScreen (actor : Actor) = isPointInsideRect actor.pos screenRect
 
 let bounceOffScreenEdge (preMoveActor : Actor) (postMoveActor : Actor) : Actor = 
@@ -548,7 +547,7 @@ let convertToDestruction (hitPos : Vec2.T) (actor : Actor) =
     { defaultDestruction with hitPos = hitPos
                               actor = { actor with visual = { vertLists = vertLists } } }
 
-let updateDestructions dt (destructions : Destruction list) = 
+let updateDestructions dt (destructions : Destruction seq) = 
     let updateDestruction (d : Destruction) : Destruction = 
         let hitPosLS = 
             d.hitPos
@@ -569,28 +568,28 @@ let updateDestructions dt (destructions : Destruction list) =
         
         { d with actor = { d.actor with visual = { d.actor.visual with vertLists = vertLists } } } //@TODO: better way?
     destructions
-    |> List.map updateDestruction
-    |> List.map (fun d -> { d with elapsedTime = d.elapsedTime + dt })
-    |> List.filter (fun d -> d.elapsedTime < destructionTime)
+    |> Seq.map updateDestruction
+    |> Seq.map (fun d -> { d with elapsedTime = d.elapsedTime + dt })
+    |> Seq.filter (fun d -> d.elapsedTime < destructionTime)
 
 let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : Canvas) = 
-    let players = gameData.players
+    let players = gameData.players |> List.toSeq
     let playerSpawnTimeOut = gameData.playerSpawnTimeOut
-    let enemies = gameData.enemies
-    let barrels = gameData.barrels
-    let bullets = gameData.bullets
+    let enemies = gameData.enemies |> List.toSeq
+    let barrels = gameData.barrels |> List.toSeq
+    let bullets = gameData.bullets |> List.toSeq
     let bulletFireTimeOut = gameData.bulletFireTimeOut
-    let destructions = gameData.destructions
+    let destructions = gameData.destructions |> List.toSeq
     let cameraShake = gameData.cameraShake
     let lastDestructions = destructions
     
     // Logic update
     //@TODO: Respawn dead players after some time
     let players, playerSpawnTimeOut = 
-        if players.IsEmpty then 
+        if Seq.isEmpty players then 
             let playerSpawnTimeOut = max 0. (playerSpawnTimeOut - dt)
             match playerSpawnTimeOut with
-            | 0. -> [ makePlayer() ], playerSpawnInterval
+            | 0. -> Seq.singleton (makePlayer()), playerSpawnInterval
             | _ -> players, playerSpawnTimeOut
         else players, playerSpawnTimeOut
     
@@ -599,21 +598,19 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
         if allEnemiesDead enemies then 
             let enemies = makeEnemyWave()
             // assign barrels from master list to new wave
-            let barrels = barrels
-            let num = Math.Min(enemies.Length, barrels.Length)
-            
+            let numEnemiesToAssignBarrelsTo = Math.Min(Seq.length enemies, Seq.length barrels)
+            let enemiesLeft = enemies |> Seq.skip numEnemiesToAssignBarrelsTo
+            // starting with enemies we don't assign barrels to (enemiesLeft), we fold into it enemies with barrels
             let enemies = 
-                enemies |> List.mapi (fun i e -> 
-                               if i < num then { e with barrel = Some(barrels.[i]) }
-                               else e)
-            
-            let barrels = barrels |> List.skip num // Remove assigned barrels
+                Seq.fold2 (fun enemies e b -> appendSingleton enemies { e with barrel = Some(b) }) enemiesLeft enemies 
+                    barrels
+            let barrels = barrels |> Seq.skip numEnemiesToAssignBarrelsTo
             (enemies, barrels)
         else (enemies, barrels)
     
     // Update players
     let players = 
-        players |> List.map (fun p -> 
+        players |> Seq.map (fun p -> 
                        p
                        |> movePlayer dt
                        |> bounceOffScreenEdge p) // 'p' here is the pre-moved copy
@@ -623,11 +620,10 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let fireBullet = bulletFireTimeOut = 0. && GameInput.Fire()
     
     let bullets = 
-        players |> List.fold (fun bullets p -> 
+        players |> Seq.fold (fun bullets p -> 
                        if fireBullet then 
-                           { defaultBullet with pos = p.pos
-                                                angle = p.angle }
-                           :: bullets
+                           appendSingleton bullets { defaultBullet with pos = p.pos
+                                                                        angle = p.angle }
                        else bullets) bullets
     
     //@TODO: per player
@@ -637,11 +633,11 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     
     let bullets = 
         bullets
-        |> List.map (fun b -> { b with pos = integrate bulletSpeed b.angle dt b.pos })
-        |> List.filter isActorOnScreen
+        |> Seq.map (fun b -> { b with pos = integrate bulletSpeed b.angle dt b.pos })
+        |> Seq.filter isActorOnScreen
     
     // Update enemies
-    let enemies = enemies |> List.map (updateEnemy dt players)
+    let enemies = enemies |> Seq.map (updateEnemy dt players)
     // Handle collisions
     let addTupleToSets (set1 : Set<'a>, set2 : Set<'b>) (x, y) = set1.Add(x), set2.Add(y)
     
@@ -658,11 +654,12 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let collisionTestWithEnemy (actor, enemy : Enemy) = collisionTest (actor, enemy.actor)
     
     let collisionsToDestructions destructions collisions = 
-        collisions
-        |> Seq.toList
-        |> List.fold 
-               (fun destructions (x, y) -> 
-               collisionPairToDestruction (x, y) :: collisionPairToDestruction (y, x) :: destructions) destructions
+        collisions |> Seq.fold (fun destructions (x, y) -> 
+                          seq { 
+                              yield collisionPairToDestruction (x, y)
+                              yield collisionPairToDestruction (y, x)
+                              yield! destructions
+                          }) destructions
     
     let deadBullets = Set<Bullet>([])
     let deadEnemies = Set<Enemy>([])
@@ -676,20 +673,20 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     let deadPlayers, deadEnemies = playerEnemyCollisions |> Seq.fold addTupleToSets (deadPlayers, deadEnemies)
     let destructions = collisionsToDestructions destructions playerEnemyCollisions
     // Remove dead actors
-    let players = players |> List.filterOut deadPlayers.Contains
-    let enemies = enemies |> List.filterOut deadEnemies.Contains
-    let bullets = bullets |> List.filterOut deadBullets.Contains
+    let players = players |> filterOut deadPlayers.Contains
+    let enemies = enemies |> filterOut deadEnemies.Contains
+    let bullets = bullets |> filterOut deadBullets.Contains
     
     // Put barrels of dead enemies back into master list
     let barrels = 
         deadEnemies
-        |> Seq.choose (fun e -> e.barrel)
-        |> Seq.fold (fun barrels b -> b :: barrels) barrels
+        |> Seq.choose (fun e -> e.barrel) // Returns list of dead enemy barrels
+        |> Seq.fold (fun barrels deadEnemyBarrel -> appendSingleton barrels deadEnemyBarrel) barrels
     
     // If enemies escaped, remove enemy (along with its barrel)
-    let enemies = enemies |> List.filter (fun e -> not (enemyEscaped e))
+    let enemies = enemies |> Seq.filter (fun e -> not (enemyEscaped e))
     //  Update destructions
-    let numNewDestructions = destructions.Length - lastDestructions.Length
+    let numNewDestructions = Seq.length destructions - Seq.length lastDestructions
     let destructions = destructions |> updateDestructions dt
     // Update camera shake
     let cameraShake = CameraShake.shakeN numNewDestructions cameraShake
@@ -699,13 +696,13 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     // To keep it pure, we need to re-register a new instance of update that
     // binds the updated gameData
     let gameData = 
-        { gameData with players = players
+        { gameData with players = players |> List.ofSeq
                         playerSpawnTimeOut = playerSpawnTimeOut
-                        enemies = enemies
-                        barrels = barrels
-                        bullets = bullets
+                        enemies = enemies |> List.ofSeq
+                        barrels = barrels |> List.ofSeq
+                        bullets = bullets |> List.ofSeq
                         bulletFireTimeOut = bulletFireTimeOut
-                        destructions = destructions
+                        destructions = destructions |> List.ofSeq
                         cameraShake = cameraShake }
     app.setOnUpdate (update app gameData)
     // Render
