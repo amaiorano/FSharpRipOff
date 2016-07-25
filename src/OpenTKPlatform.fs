@@ -52,8 +52,10 @@ type GameWindow(title, viewportSize) =
     inherit OpenTK.GameWindow()
     let canvas = Canvas() //@TODO: move to Application
     let mutable onUpdate = fun dt c -> ()
+    let mutable averageSecPerFrame = 0.
+    let baseTitle = title
     
-    do 
+    do
         base.VSync <- VSyncMode.On
         base.Title <- title
     
@@ -69,6 +71,9 @@ type GameWindow(title, viewportSize) =
         if Input.Keyboard.GetState().[Input.Key.Escape] then base.Close()
     
     override this.OnRenderFrame e = 
+        let spfHistoryBias = 0.95
+        averageSecPerFrame <- spfHistoryBias * averageSecPerFrame + (1. - spfHistoryBias) * e.Time
+        this.Title <- baseTitle + sprintf " msPerFrame: %.2f (FPS: %.2f)" (averageSecPerFrame * 1000.) (1. / averageSecPerFrame)
         base.OnRenderFrame e
         GL.Clear(ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit)
         GL.MatrixMode(MatrixMode.Modelview)
@@ -124,4 +129,4 @@ type Application(title, viewportSize) =
         |> centerGameWindow
     
     member this.setOnUpdate = gameWindow.setOnUpdate
-    member this.run() = gameWindow.Run(30.)
+    member this.run() = gameWindow.Run()
