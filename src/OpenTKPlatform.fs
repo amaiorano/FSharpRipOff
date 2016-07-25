@@ -30,7 +30,7 @@ type Canvas() =
     member this.rotate angle = GL.Rotate(radToDeg angle, Vector3d.UnitZ)
     member this.color (r:float) g b = GL.Color3(r, g, b)
     member this.drawVertices (verts : (float * float) list) =
-        GL.Begin(BeginMode.LineLoop)
+        GL.Begin(PrimitiveType.LineLoop)
         verts |> Seq.iter GL.Vertex2
         GL.End()
 
