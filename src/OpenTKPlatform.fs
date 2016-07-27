@@ -12,7 +12,11 @@ type Key = OpenTK.Input.Key
 
 module Keyboard = 
     let IsDown(key : Input.Key) = Input.Keyboard.GetState().IsKeyDown(key)
-    let IsAnyDown(keys : Input.Key list) = keys |> List.tryFind IsDown |> Option.isSome
+    
+    let IsAnyDown(keys : Input.Key list) = 
+        keys
+        |> List.tryFind IsDown
+        |> Option.isSome
 
 type Canvas() = 
     
@@ -28,25 +32,23 @@ type Canvas() =
     member this.restore() = GL.PopMatrix()
     member this.translate (x : float, y : float) = GL.Translate(x, y, 0.)
     member this.rotate angle = GL.Rotate(radToDeg angle, Vector3d.UnitZ)
-    member this.color (r:float) g b = GL.Color3(r, g, b)
-    member this.drawVertices (verts : (float * float) list) =
+    member this.color (r : float) g b = GL.Color3(r, g, b)
+    member this.drawVertices (verts : (float * float) list) = 
         GL.Begin(PrimitiveType.LineLoop)
         verts |> Seq.iter GL.Vertex2
         GL.End()
 
-type DebugDraw() =
+type DebugDraw() = 
     let mutable lines = [] // list of lists of float * float
-    member this.line (pos1:float*float) (pos2:float*float) =
-        lines <- [pos1; pos2] :: lines
-        
-    member this.draw (canvas:Canvas) =
+    member this.line (pos1 : float * float) (pos2 : float * float) = lines <- [ pos1; pos2 ] :: lines
+    
+    member this.draw (canvas : Canvas) = 
         canvas.color 1. 0. 0.
         lines |> List.iter canvas.drawVertices
+    
+    member this.clear() = lines <- []
 
-    member this.clear() =
-        lines <- []
-
-let debugDraw = DebugDraw ()
+let debugDraw = DebugDraw()
 
 type GameWindow(title, viewportSize) = 
     inherit OpenTK.GameWindow()
@@ -55,7 +57,7 @@ type GameWindow(title, viewportSize) =
     let mutable averageSecPerFrame = 0.
     let baseTitle = title
     
-    do
+    do 
         base.VSync <- VSyncMode.On
         base.Title <- title
     
@@ -73,7 +75,8 @@ type GameWindow(title, viewportSize) =
     override this.OnRenderFrame e = 
         let spfHistoryBias = 0.95
         averageSecPerFrame <- spfHistoryBias * averageSecPerFrame + (1. - spfHistoryBias) * e.Time
-        this.Title <- baseTitle + sprintf " msPerFrame: %.2f (FPS: %.2f)" (averageSecPerFrame * 1000.) (1. / averageSecPerFrame)
+        this.Title <- baseTitle 
+                      + sprintf " msPerFrame: %.2f (FPS: %.2f)" (averageSecPerFrame * 1000.) (1. / averageSecPerFrame)
         base.OnRenderFrame e
         GL.Clear(ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit)
         GL.MatrixMode(MatrixMode.Modelview)

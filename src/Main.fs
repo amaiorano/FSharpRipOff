@@ -1,68 +1,12 @@
-﻿open OpenTKPlatform
-open System
+﻿open System
+open OpenTKPlatform
+open MathEx
 
 //@TODO: add these to Seq module?
 let filterOut predicate seq = seq |> Seq.filter (fun x -> not (predicate x))
 let appendSingleton sequence x = Seq.singleton x |> Seq.append sequence
-
-let removeOuterList (list : 'a list list) = 
-    [ for x in list do
-          yield! x ]
-
 let swapArgs f a b = f b a
 let castTuple t (a, b) = (t a, t b)
-let min (x : float) (y : float) = Math.Min(x, y)
-let max (x : float) (y : float) = Math.Max(x, y)
-
-let clamp minV maxV v = 
-    v
-    |> max minV
-    |> min maxV
-
-let cos = Math.Cos
-let sin = Math.Sin
-let atan2 = Math.Atan2
-let cossin rads = (cos (rads), sin (rads))
-let twoPI = 2. * Math.PI
-let normalizeAngle2PI rads = Math.IEEERemainder(rads, twoPI)
-
-let normalizeAnglePI rads = 
-    match (normalizeAngle2PI rads) with
-    | x when x <= Math.PI -> x
-    | x -> twoPI - x
-
-module Vec2 = 
-    type T = float * float
-    
-    let zero = 0., 0.
-    let add (x1, y1) (x2, y2) = x1 + x2, y1 + y2
-    let sub (x1, y1) (x2, y2) = x1 - x2, y1 - y2
-    let elementWiseMul (x1, y1) (x2, y2) = x1 * x2, y1 * y2
-    let mul s (x, y) = x * s, y * s
-    let addMul (x, y) (dx, dy) s = x + dx * s, y + dy * s
-    let magnitude (x, y) = Math.Sqrt(x * x + y * y)
-    
-    let normalize (x, y) = 
-        let mag = magnitude (x, y)
-        assert (mag <> 0.)
-        x / mag, y / mag
-    
-    let fromAngle rads = cossin (rads)
-    
-    let toAngle (x, y) = 
-        let (x, y) = normalize (x, y)
-        atan2 (y, x)
-    
-    let dot (x1, y1) (x2, y2) = x1 * x2 + y1 * y2
-    let cross (x1, y1) (x2, y2) = x1 * y2 - y1 * x2
-    let distance v1 v2 = magnitude (sub v1 v2)
-    // returns rads in [0,PI]
-    let shortestAngleDiff v1 v2 = Math.Acos(dot (normalize (v1)) (normalize (v2)))
-    // returns angle in [-PI,PI]
-    let signedAngleDiff v1 v2 = Math.Atan2(cross v1 v2, dot v1 v2)
-
-type Vec2List = Vec2.T list
-
 // OpenTK math types
 //@TODO: should we depend on these? If so, add Vector3 and Matrix4 to OpenTKPlatform to get rid of the namespace
 let toVector3 pos = OpenTK.Vector3(float32 (fst pos), float32 (snd pos), 0.f)
@@ -85,38 +29,6 @@ let choosePermute2 predicate seq1 seq2 =
                                                      if predicate (e1, e2) then appendSingleton tuples (e1, e2)
                                                      else tuples))
 
-// Returns intersection of lines ps1,pe1 and ps2,pe2
-let intersection (ps1x, ps1y) (pe1x, pe1y) (ps2x, ps2y) (pe2x, pe2y) = 
-    let A1 = pe1y - ps1y
-    let B1 = ps1x - pe1x
-    let C1 = A1 * ps1x + B1 * ps1y
-    let A2 = pe2y - ps2y
-    let B2 = ps2x - pe2x
-    let C2 = A2 * ps2x + B2 * ps2y
-    let delta = A1 * B2 - A2 * B1
-    //    if delta = 0. then None
-    assert (delta <> 0.)
-    (B2 * C1 - B1 * C2) / delta, (A1 * C2 - A2 * C1) / delta
-
-type Approach = 
-    // Approaches current towards target using a viscous damped approach; by default, it will reach
-    // 99% (factor) of target within 1 (timeToTarget) second, then will keep getting closer but never
-    // reach the (asymptotic) target. The tolerance can be set to make sure the target is reached, but
-    // keep in mind that this modifies the shape of the curve (slightly).
-    static member damped (current, target, dt, ?factor, ?timeToTarget, ?tolerance) = 
-        let factor = defaultArg factor 0.99
-        let timeToTarget = defaultArg timeToTarget 1.
-        let tolerance = defaultArg tolerance 0.
-        if current = target || timeToTarget = 0. then target
-        else 
-            let delta = target - current
-            let deltaSign = float (Math.Sign(float32 delta))
-            let newTarget = target + deltaSign * tolerance
-            let alpha = 1. - Math.Pow(1. - factor, dt / timeToTarget)
-            let step = (newTarget - current) * alpha
-            if (step * deltaSign) > (delta * deltaSign) then target
-            else current + step
-
 // Game-specific
 let screenSize = 800., 600.
 // order: left, bottom, right, top
@@ -133,15 +45,11 @@ let screenEdges =
     [ (r, t)
       (l, t) ]
 
-type Visual = 
-    { // List of vertex lists, each of which will be drawn as a line loop
-      vertLists : Vec2List list }
-
 type Actor = 
     { pos : Vec2.T
       angle : float // rads
       speed : float
-      visual : Visual }
+      visual : Visual.T }
 
 let defaultActor = 
     { pos = (0., 0.)
@@ -183,7 +91,7 @@ let defaultDestruction =
       hitPos = Vec2.zero
       elapsedTime = 0. }
 
-let drawVisual (canvas : Canvas) (vis : Visual) = vis.vertLists |> List.iter canvas.drawVertices
+let drawVisual (canvas : Canvas) (vis : Visual.T) = vis.vertLists |> List.iter canvas.drawVertices
 
 let drawActor (canvas : Canvas) (actor : Actor) = 
     canvas.save()
@@ -205,53 +113,10 @@ let toActorWorldSpace (actor : Actor) (v : Vec2.T) =
     let vf = OpenTK.Vector3.Transform(toVector3 v, m)
     fromVector3 vf
 
-module Shape = 
-    let scale (x, y) verts = verts |> List.map (fun (x', y') -> (x' * x, y' * y))
-    let scaleUni s verts = scale (s, s) verts
-    let translate (x, y) verts = verts |> List.map (fun (x', y') -> (x' + x, y' + y))
-    let translateInv (x, y) verts = translate (-x, -y) verts
-    
-    // returns (minX,minY,maxX,maxY)
-    let extents (v : Vec2List) = 
-        let rec f (v : Vec2List) (minX, minY, maxX, maxY) = 
-            match v with
-            | [] -> (minX, minY, maxX, maxY)
-            | (hx, hy) :: tail -> f tail (min hx minX, min hy minY, max hx maxX, max hy maxY)
-        
-        let (minX, minY), (maxX, maxY) = v.[0], v.[1]
-        f v (minX, minY, maxX, maxY)
-    
-    // returns center point of input extents (as Vec2)
-    let midpoint (v : Vec2List) = 
-        let (minX, minY, maxX, maxY) = extents v
-        (minX + (maxX - minX) / 2., minY + (maxY - minY) / 2.)
-    
-    // returns new Vec2List translated so that its midpoint is (0,0) in local space
-    let center (v : Vec2List) = translateInv (midpoint v) v
-    let shrinkToRect (minX, minY, maxX, maxY) (v : Vec2List) = 
-        v |> List.map (fun (x, y) -> x |> clamp minX maxX, y |> clamp minY maxY)
-    
-    // shape functions return unit-sized shapes centered around the origin
-    let square = 
-        [ (0., 0.)
-          (0., 1.)
-          (1., 1.)
-          (1., 0.) ]
-        |> center
-    
-    let circle segs = 
-        [ for s in 0..segs - 1 -> (cossin (twoPI / (float segs) * (float s))) ]
-    
-    let triangle = circle 3
-    
-    let line length = 
-        [ (-length / 2., 0.)
-          (length / 2., 0.) ]
-
 module GameVisual = 
     open Shape
     
-    let makeTank() = 
+    let makeTank() : Visual.T = 
         let body = square |> scale (28., 16.)
         
         let turret = 
@@ -269,7 +134,7 @@ module GameVisual =
         let wheel2 = wheels |> translate (0., 13.)
         { vertLists = [ body; wheel1; wheel2; turret ] }
     
-    let makeEnemy() = 
+    let makeEnemy() : Visual.T = 
         let body = square |> scale (25., 16.)
         let body2 = circle 8 |> scaleUni 5.
         
@@ -282,8 +147,8 @@ module GameVisual =
         let turret2 = turret |> translate (0., 5.)
         { vertLists = [ body; body2; turret1; turret2 ] }
     
-    let makeBarrel() = { vertLists = [ circle 6 |> scaleUni 10. ] }
-    let makeBullet() = { vertLists = [ square |> scale (4., 2.) ] }
+    let makeBarrel() : Visual.T = { vertLists = [ circle 6 |> scaleUni 10. ] }
+    let makeBullet() : Visual.T = { vertLists = [ square |> scale (4., 2.) ] }
 
 let defaultBullet : Bullet = { defaultActor with visual = GameVisual.makeBullet() }
 
@@ -511,7 +376,7 @@ let bounceOffScreenEdge (preMoveActor : Actor) (postMoveActor : Actor) : Actor =
     let x1, y1 = preMoveActor.pos
     let x2, y2 = postMoveActor.pos
     
-    let computeReflectedPosAndAngle (edge : Vec2List) reflectDir = 
+    let computeReflectedPosAndAngle (edge : Vec2.List) reflectDir = 
         let p = intersection (x1, y1) (x2, y2) edge.[0] edge.[1]
         let p' = Vec2.sub postMoveActor.pos p // intersection point to new pos
         let delta = Vec2.elementWiseMul p' reflectDir
@@ -532,20 +397,8 @@ let bounceOffScreenEdge (preMoveActor : Actor) (postMoveActor : Actor) : Actor =
                          angle = angle }
 
 let convertToDestruction (hitPos : Vec2.T) (actor : Actor) = 
-    // create single list of lines
-    let vertLists = actor.visual.vertLists
-    
-    // Break apart each vert list into list of lines
-    //@TODO: move to a Visual module function
-    let vertLists = 
-        vertLists
-        |> List.map (fun verts -> 
-               verts @ [ verts.[0] ] //@TODO: inefficient!
-               |> List.pairwise
-               |> List.map (fun (x, y) -> [ x; y ]))
-        |> removeOuterList
     { defaultDestruction with hitPos = hitPos
-                              actor = { actor with visual = { vertLists = vertLists } } }
+                              actor = { actor with visual = Visual.breakIntoLines actor.visual } }
 
 let updateDestructions dt (destructions : Destruction seq) = 
     let updateDestruction (d : Destruction) : Destruction = 
