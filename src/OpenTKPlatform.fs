@@ -53,6 +53,7 @@ let debugDraw = DebugDraw()
 type GameWindow(title, viewportSize) = 
     inherit OpenTK.GameWindow()
     let canvas = Canvas() //@TODO: move to Application
+    let drawFps = false
     let mutable onUpdate = fun dt c -> ()
     let mutable averageSecPerFrame = 0.
     let baseTitle = title
@@ -75,8 +76,10 @@ type GameWindow(title, viewportSize) =
     override this.OnRenderFrame e = 
         let spfHistoryBias = 0.95
         averageSecPerFrame <- spfHistoryBias * averageSecPerFrame + (1. - spfHistoryBias) * e.Time
-        this.Title <- baseTitle 
-                      + sprintf " msPerFrame: %.2f (FPS: %.2f)" (averageSecPerFrame * 1000.) (1. / averageSecPerFrame)
+        if drawFps then 
+            this.Title <- baseTitle 
+                          + sprintf " msPerFrame: %.2f (FPS: %.2f)" (averageSecPerFrame * 1000.) 
+                                (1. / averageSecPerFrame)
         base.OnRenderFrame e
         GL.Clear(ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit)
         GL.MatrixMode(MatrixMode.Modelview)
