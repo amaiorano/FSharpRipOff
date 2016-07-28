@@ -184,11 +184,12 @@ type GameData =
       cameraShake : CameraShake.T }
 
 let allActors gameData = 
-    gameData.players 
-    @ gameData.barrels 
-      @ (gameData.enemies |> List.map (fun e -> e.actor)) 
-        @ (gameData.enemies |> List.choose (fun e -> e.barrel)) 
-          @ gameData.bullets @ (gameData.destructions |> List.map (fun d -> d.actor))
+    gameData.players
+    |> Seq.append gameData.barrels
+    |> Seq.append (gameData.enemies |> Seq.map (fun e -> e.actor))
+    |> Seq.append (gameData.enemies |> Seq.choose (fun e -> e.barrel))
+    |> Seq.append gameData.bullets
+    |> Seq.append (gameData.destructions |> Seq.map (fun d -> d.actor))
 
 type SpeedConstants = 
     { speedUpRate : float
@@ -562,7 +563,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     canvas.resetTransform()
     canvas.clear()
     canvas.translate cameraShakeOffset
-    allActors gameData |> List.iter (fun actor -> drawActor canvas actor)
+    allActors gameData |> Seq.iter (fun actor -> drawActor canvas actor)
 
 let main() = 
     let barrel = { defaultActor with visual = GameVisual.makeBarrel() }
