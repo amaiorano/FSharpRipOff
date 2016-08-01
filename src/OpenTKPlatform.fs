@@ -18,23 +18,30 @@ module Keyboard =
         |> List.tryFind IsDown
         |> Option.isSome
 
-type Canvas() = 
+type Canvas() as this = 
+    do
+        this.fillstyle (0., 0., 0.)
     
     member this.resetTransform() = 
         GL.MatrixMode(MatrixMode.Modelview)
         GL.LoadIdentity()
     
-    member this.clear() = 
-        GL.ClearColor(0.f, 0.f, 0.2f, 1.f)
-        GL.Clear(ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit)
-    
+    member this.fillstyle ((r, g, b) : float * float * float) = GL.ClearColor(float32 r, float32 g, float32 b, 1.f)
+    member this.clear() = GL.Clear(ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit)
     member this.save() = GL.PushMatrix()
     member this.restore() = GL.PopMatrix()
     member this.translate (x : float, y : float) = GL.Translate(x, y, 0.)
     member this.rotate angle = GL.Rotate(radToDeg angle, Vector3d.UnitZ)
     member this.color (r : float) g b = GL.Color3(r, g, b)
+    
     member this.drawVertices (verts : (float * float) list) = 
         GL.Begin(PrimitiveType.LineLoop)
+        verts |> Seq.iter GL.Vertex2
+        GL.End()
+    
+    member this.drawVerticesColors (verts : (float * float) list) ((r, g, b) : float * float * float) = 
+        GL.Begin(PrimitiveType.LineLoop)
+        GL.Color3(r, g, b)
         verts |> Seq.iter GL.Vertex2
         GL.End()
 

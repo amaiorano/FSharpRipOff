@@ -1,22 +1,28 @@
 ﻿module Visual
 
+type Color = float * float * float
+
 type T = 
     { // List of vertex lists, each of which will be drawn as a line loop
-      vertLists : Vec2.List list }
+      vertLists : Vec2.List list
+      colors : Color list }
+
+let defaultVisual = 
+    { vertLists = [ [] ]
+      colors = [] }
 
 // Breaks apart each vert list into list of lines
 let breakIntoLines visual = 
-    //@TODO: utility module
-    let removeOuterList (list : 'a list list) = 
-        [ for x in list do
-              yield! x ]
+    let folder (newVertLists, newColors) oldVerts oldColor = 
+        let lines = 
+            oldVerts @ [ oldVerts.[0] ] // Append initial element at the back since we expect a line loop
+            |> Seq.pairwise
+            |> Seq.map (fun (x, y) -> [ x; y ])
+        (Seq.append lines newVertLists, Seq.append (Seq.replicate (Seq.length lines) oldColor) newColors)
     
-    let vertLists = 
-        visual.vertLists
-        |> List.map (fun verts -> 
-               verts @ [ verts.[0] ] //@TODO: inefficient!
-               |> List.pairwise
-               |> List.map (fun (x, y) -> [ x; y ]))
-        |> removeOuterList
-    
-    { visual with vertLists = vertLists }
+    let vertLists, colors = (visual.vertLists, visual.colors) ||> Seq.fold2 folder (Seq.empty, Seq.empty)
+    { visual with vertLists = List.ofSeq vertLists
+                  colors = List.ofSeq colors }
+
+let draw (canvas : OpenTKPlatform.Canvas) (vis : T) = 
+    List.iter2 (fun verts color -> canvas.drawVerticesColors verts color) vis.vertLists vis.colors
