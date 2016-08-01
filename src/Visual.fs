@@ -1,11 +1,9 @@
 ﻿module Visual
 
-type Color = float * float * float
-
 type T = 
     { // List of vertex lists, each of which will be drawn as a line loop
       vertLists : Vec2.List list
-      colors : Color list }
+      colors : Color.T list }
 
 let defaultVisual = 
     { vertLists = [ [] ]

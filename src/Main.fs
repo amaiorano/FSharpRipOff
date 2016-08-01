@@ -110,16 +110,9 @@ let toActorWorldSpace (actor : Actor) (v : Vec2.T) =
     let vf = OpenTK.Vector3.Transform(toVector3 v, m)
     fromVector3 vf
 
-module Colors = 
-    let black = (0., 0., 0.)
-    let white = (1., 1., 1.)
-    let red = (1., 0., 0.)
-    let green = (0., 1., 0.)
-    let blue = (0., 0., 1.)
-
 module GameVisual = 
     open Shape
-    open Colors
+    open Color
     
     let makeTank() : Visual.T = 
         let body = square |> scale (28., 16.)
@@ -137,8 +130,8 @@ module GameVisual =
         let wheels = buildWheels 6. 5
         let wheel1 = wheels |> translate (0., -13.)
         let wheel2 = wheels |> translate (0., 13.)
-        { vertLists = [ body; wheel1; wheel2; turret ]
-          colors = [ white; white; white; white ] }
+        { vertLists = [ turret; body; wheel1; wheel2 ]
+          colors = [ khaki; darkKhaki; green; green ] }
     
     let makeEnemy() : Visual.T = 
         let body = square |> scale (25., 16.)
@@ -151,16 +144,16 @@ module GameVisual =
         
         let turret1 = turret |> translate (0., -5.)
         let turret2 = turret |> translate (0., 5.)
-        { vertLists = [ body; body2; turret1; turret2 ]
-          colors = [ white; white; white; white ] }
+        { vertLists = [ turret1; turret2; body; body2 ]
+          colors = [ lightBlue; lightBlue; blue; deepSkyBlue ] }
     
     let makeBarrel() : Visual.T = 
         { vertLists = [ circle 6 |> scaleUni 10. ]
-          colors = [ white ] }
+          colors = [ lightYellow ] }
     
     let makeBullet() : Visual.T = 
         { vertLists = [ square |> scale (4., 2.) ]
-          colors = [ white ] }
+          colors = [ silver ] }
 
 let defaultBullet : Bullet = { defaultActor with visual = GameVisual.makeBullet() }
 
@@ -573,7 +566,7 @@ let rec update (app : Application) (gameData : GameData) (dt : float) (canvas : 
     app.setOnUpdate (update app gameData)
     // Render
     canvas.resetTransform()
-    canvas.fillstyle (0., 0., 0.2)
+    canvas.lineWidth (4.)
     canvas.clear()
     canvas.translate cameraShakeOffset
     allActors gameData |> Seq.iter (fun actor -> drawActor canvas actor)

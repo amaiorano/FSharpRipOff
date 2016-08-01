@@ -54,6 +54,7 @@
     <None Include="App.config" />
     <Compile Include="src\AssemblyInfo.fs" />
     <Compile Include="src\OpenTKPlatform.fs" />
+    <Compile Include="src\Color.fs" />
     <Compile Include="src\MathEx.fs" />
     <Compile Include="src\Vec2.fs" />
     <Compile Include="src\Shape.fs" />

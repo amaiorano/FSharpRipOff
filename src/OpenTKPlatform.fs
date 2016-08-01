@@ -19,14 +19,14 @@ module Keyboard =
         |> Option.isSome
 
 type Canvas() as this = 
-    do
-        this.fillstyle (0., 0., 0.)
+    do this.fillstyle (0., 0., 0.)
     
     member this.resetTransform() = 
         GL.MatrixMode(MatrixMode.Modelview)
         GL.LoadIdentity()
     
     member this.fillstyle ((r, g, b) : float * float * float) = GL.ClearColor(float32 r, float32 g, float32 b, 1.f)
+    member this.lineWidth (w : float) = GL.LineWidth(float32 w)
     member this.clear() = GL.Clear(ClearBufferMask.ColorBufferBit ||| ClearBufferMask.DepthBufferBit)
     member this.save() = GL.PushMatrix()
     member this.restore() = GL.PopMatrix()
